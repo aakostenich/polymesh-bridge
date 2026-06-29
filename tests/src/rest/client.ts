@@ -7,6 +7,7 @@ import { TxBase } from '~/rest/common';
 import { Compliance } from '~/rest/compliance';
 import { CorporateActions } from '~/rest/corporate-actions';
 import { Identities } from '~/rest/identities';
+import { RestErrorResult } from '~/rest/interfaces';
 import { Network } from '~/rest/network';
 import { Nfts } from '~/rest/nfts';
 import { Portfolios } from '~/rest/portfolios';
@@ -83,7 +84,21 @@ export class RestClient {
       body,
     });
 
-    return response.json();
+    const text = await response.text();
+    const payload = text ? JSON.parse(text) : undefined;
+
+    if (!response.ok) {
+      return {
+        ...(typeof payload === 'object' && payload !== null ? payload : { message: String(payload) }),
+        statusCode: response.status,
+        error:
+          (typeof payload === 'object' && payload !== null && 'error' in payload
+            ? payload.error
+            : response.statusText) || 'Error',
+      } as RestErrorResult;
+    }
+
+    return payload;
   }
 
   public async pingForTransaction(txHash: string, times: number): Promise<unknown> {

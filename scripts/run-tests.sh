@@ -12,4 +12,5 @@ export VAULT_TOKEN=$("${SCRIPT_DIR}/get-vault-token.sh")
 
 # Run jest with default maxWorkers and any additional arguments passed to this script
 echo "[RUN TESTS] Beginning tests..."
+cd "${SCRIPT_DIR}/../tests"
 yarn jest --maxWorkers=8 "$@"

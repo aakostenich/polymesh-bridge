@@ -74,7 +74,14 @@ export class Settlements {
 
   public async getAffirmations(
     instructionId: string
-  ): Promise<ResultSet<{ identity: string; status: string }>> {
+  ): Promise<
+    ResultSet<{
+      identity?: string;
+      party?: { did?: string; address?: string; type?: string };
+      partyType?: string;
+      status: string;
+    }>
+  > {
     return this.client.get(`/instructions/${instructionId}/affirmations`);
   }
 

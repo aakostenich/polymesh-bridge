@@ -5,6 +5,7 @@ import { createAssetParams } from '~/rest/assets/params';
 import { ProcessMode } from '~/rest/common';
 import { Identity } from '~/rest/identities/interfaces';
 import { fungibleInstructionParams, venueParams } from '~/rest/settlements';
+import { withPendingInstructionBlock } from '~/util';
 
 const handles = ['issuer', 'investor', 'mediator'];
 let factory: TestFactory;
@@ -60,16 +61,20 @@ describe('Create and trading an Asset with mediators', () => {
   it('should create an instruction', async () => {
     const sender = issuer.did;
     const receiver = investor.did;
-    const params = fungibleInstructionParams(
-      assetId,
-      sender,
-      receiver,
-      {
-        options: { processMode: ProcessMode.Submit, signer },
-      },
-      {
-        mediators: [mediator.did],
-      }
+    const params = await withPendingInstructionBlock(
+      restClient,
+      factory.polymeshSdk,
+      fungibleInstructionParams(
+        assetId,
+        sender,
+        receiver,
+        {
+          options: { processMode: ProcessMode.Submit, signer },
+        },
+        {
+          mediators: [mediator.did],
+        }
+      )
     );
     const instructionData = await restClient.settlements.createInstruction(venueId, params);
 
@@ -106,7 +111,8 @@ describe('Create and trading an Asset with mediators', () => {
     });
   });
 
-  it('should allow the mediator to withdraw affirmation', async () => {
+  // Affirmation withdraw is discontinued on chain v8
+  it.skip('should allow the mediator to withdraw affirmation', async () => {
     const withdrawResult = await restClient.settlements.withdrawAsMediator(instructionId, {
       options: { processMode: ProcessMode.Submit, signer: mediator.signer },
     });

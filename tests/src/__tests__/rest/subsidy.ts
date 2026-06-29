@@ -3,7 +3,13 @@ import { TestFactory } from '~/helpers';
 import { RestClient } from '~/rest';
 import { ProcessMode } from '~/rest/common';
 import { Identity } from '~/rest/identities/interfaces';
-import { createSubsidyParams, quitSubsidyParams, setSubsidyAllowanceParams } from '~/rest/subsidy';
+import {
+  acceptSubsidyParams,
+  createSubsidyParams,
+  quitSubsidyParams,
+  setSubsidyAllowanceParams,
+} from '~/rest/subsidy';
+import { isChainV7 } from '~/util';
 
 const handles = ['subsidizer', 'beneficiary'];
 let factory: TestFactory;
@@ -17,7 +23,6 @@ describe('Subsidy', () => {
   let subsidizerAddress: string;
   let beneficiary: Identity;
   let beneficiaryAddress: string;
-  let authId: string;
 
   beforeAll(async () => {
     factory = await TestFactory.create({ handles });
@@ -34,31 +39,24 @@ describe('Subsidy', () => {
     await factory.close();
   });
 
-  it('should subsidize an account', async () => {
+  it('should approve a subsidy for an account', async () => {
     const params = createSubsidyParams(beneficiaryAddress, {
       options: { processMode: ProcessMode.Submit, signer },
     });
 
-    const result = await restClient.subsidy.createSubsidy(params);
+    const result = await restClient.subsidy.approveSubsidy(params);
 
-    expect(result.authorizationRequest).toEqual(
-      expect.objectContaining({ id: expect.stringMatching(/\d+/) })
-    );
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    authId = (result.authorizationRequest as any).id;
-
-    expect(result).toEqual(assertTagPresent(expect, 'relayer.setPayingKey'));
+    expect(result).toEqual(assertTagPresent(expect, 'relayer.approveSubsidy'));
   });
 
   it('should accept a subsidy', async () => {
-    const params = {
+    const params = acceptSubsidyParams(subsidizerAddress, {
       options: { processMode: ProcessMode.Submit, signer: beneficiary.signer },
-    };
+    });
 
-    const result = await restClient.identities.acceptAuthorization(authId, params);
+    const result = await restClient.subsidy.acceptSubsidy(params);
 
-    expect(result).toEqual(assertTagPresent(expect, 'relayer.acceptPayingKey'));
+    expect(result).toEqual(assertTagPresent(expect, 'relayer.acceptSubsidy'));
   });
 
   it('should set subsidy allowance', async () => {
@@ -94,8 +92,12 @@ describe('Subsidy', () => {
       options: { processMode: ProcessMode.Submit, signer: beneficiary.signer },
     });
 
+    const quitTag = isChainV7(factory.polymeshSdk)
+      ? 'relayer.removePayingKey'
+      : 'relayer.removeSubsidy';
+
     const result = await restClient.subsidy.quitSubsidy(params);
 
-    expect(result).toEqual(assertTagPresent(expect, 'relayer.removePayingKey'));
+    expect(result).toEqual(assertTagPresent(expect, quitTag));
   });
 });

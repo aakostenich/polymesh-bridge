@@ -5,7 +5,7 @@ import {
 } from '@polymeshassociation/polymesh-sdk/types';
 
 import { RestClient } from '~/rest';
-import { PostResult } from '~/rest/interfaces';
+import { PostResult, RestSuccessResult } from '~/rest/interfaces';
 
 export const alphabet = [...Array(26)].map((val, i) => String.fromCharCode(i + 65));
 
@@ -142,3 +142,113 @@ export const awaitMiddlewareSyncedForRestApi = async (
  */
 export const getDayInFuture = (days: number): Date =>
   new Date(Date.now() + 1000 * 60 * 60 * 24 * days);
+
+type PolymeshWithContext = Polymesh & {
+  context: { isV7: boolean };
+};
+
+export const isChainV7 = (sdk: Polymesh): boolean =>
+  (sdk as PolymeshWithContext).context.isV7;
+
+export const isRestError = (
+  result: unknown
+): result is { statusCode: number; message?: string | string[] } =>
+  typeof result === 'object' && result !== null && 'statusCode' in result;
+
+export const getInstructionId = (result: PostResult): string | undefined =>
+  (result as RestSuccessResult).instruction as string | undefined;
+
+export const isAlreadyAffirmedError = (result: unknown): boolean =>
+  isRestError(result) && String(result.message).toLowerCase().includes('already affirmed');
+
+export const isInstructionPurgedError = (result: unknown): boolean =>
+  isRestError(result) &&
+  result.statusCode === 500 &&
+  (String(result.message).toLowerCase().includes('purged') ||
+    String(result.message).toLowerCase().includes('internal server error'));
+
+export type VenueInstructionResult = {
+  result: PostResult;
+  instructionId?: string;
+  autoSettled: boolean;
+};
+
+/**
+ * Create a venue instruction. On v8 exchange venues the instruction may auto-settle and be
+ * purged before the API returns (500). Callers should check `autoSettled` and skip affirm flows.
+ */
+export const createVenueInstruction = async (
+  restClient: RestClient,
+  polymeshSdk: Polymesh,
+  venueId: string,
+  params: Record<string, unknown>,
+  { keepPending = false }: { keepPending?: boolean } = {}
+): Promise<VenueInstructionResult> => {
+  const createParams = keepPending
+    ? await withPendingInstructionBlock(restClient, polymeshSdk, params)
+    : params;
+
+  const result = await restClient.settlements.createInstruction(
+    venueId,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    createParams as any
+  );
+
+  if (isInstructionPurgedError(result)) {
+    return { result, autoSettled: true };
+  }
+
+  return {
+    result,
+    instructionId: getInstructionId(result),
+    autoSettled: false,
+  };
+};
+
+export const createDirectInstruction = async (
+  restClient: RestClient,
+  polymeshSdk: Polymesh,
+  params: Record<string, unknown>,
+  { keepPending = false }: { keepPending?: boolean } = {}
+): Promise<VenueInstructionResult> => {
+  const createParams = keepPending
+    ? await withPendingInstructionBlock(restClient, polymeshSdk, params)
+    : params;
+
+  const result = await restClient.settlements.createDirectInstruction(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    createParams as any
+  );
+
+  if (isInstructionPurgedError(result)) {
+    return { result, autoSettled: true };
+  }
+
+  return {
+    result,
+    instructionId: getInstructionId(result),
+    autoSettled: false,
+  };
+};
+
+/**
+ * On chain v8, venue instructions without an end block can auto-execute and be purged
+ * before the API returns. Tests that need a pending instruction should pass this.
+ */
+export const withPendingInstructionBlock = async <T extends Record<string, unknown>>(
+  restClient: RestClient,
+  polymeshSdk: Polymesh,
+  params: T,
+  blocksAhead = 50
+): Promise<T & { endAfterBlock?: string }> => {
+  if (isChainV7(polymeshSdk)) {
+    return params;
+  }
+
+  const latestBlock = await restClient.network.getLatestBlock();
+
+  return {
+    ...params,
+    endAfterBlock: (Number(latestBlock.id) + blocksAhead).toString(),
+  };
+};

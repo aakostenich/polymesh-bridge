@@ -14,7 +14,7 @@ services:
       POSTGRES_DB: postgres
 
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -40,7 +40,7 @@ services:
       DB_PORT: 5432
       START_BLOCK: 1
       NETWORK_ENDPOINT: ${POLYMESH_CHAIN_WS:-ws://polymesh-node:9944}
-      NETWORK_HTTP_ENDPOINT: http://polymesh-node:9933
+      NETWORK_HTTP_ENDPOINT: http://polymesh-node:9944
       NETWORK_CHAIN_ID: ${CHAIN_ID:-}
       NODE_ENV: local
     command:
@@ -48,7 +48,7 @@ services:
       - -f=/app
       - --local
     healthcheck:
-      test: ['CMD', 'curl', '--fail', 'http://subquery-node:3000/ready']
+      test: ["CMD", "curl", "--fail", "http://subquery-node:3000/ready"]
       interval: 20s
       timeout: 5s
       retries: 20
@@ -81,10 +81,10 @@ services:
     healthcheck:
       test:
         [
-          'CMD',
-          'curl',
-          '--fail',
-          'subquery-graphql:3000/.well-known/apollo/server-health',
+          "CMD",
+          "curl",
+          "--fail",
+          "subquery-graphql:3000/.well-known/apollo/server-health",
         ]
       interval: 10s
       timeout: 5s
@@ -97,13 +97,12 @@ services:
       - polymesh
     ports:
       - ${POLYMESH_CHAIN_WS_PORT:-9944}:9944
-      - ${POLYMESH_CHAIN_RPC_PORT:-9933}:9933
+      - ${POLYMESH_CHAIN_RPC_PORT:-9933}:9944
       - ${POLYMESH_CHAIN_P2P_PORT:-30333}:30333
     volumes:
       - chain-data:/var/lib/polymesh
     command:
       - --base-path=/var/lib/polymesh
-      - --unsafe-ws-external
       - --unsafe-rpc-external
       - --wasm-execution=compiled
       - --no-prometheus
@@ -116,12 +115,12 @@ services:
       - --force-authoring
       - --port=30333
       - --alice
-      - --chain=dev
+      - --dev
     configs:
       - source: polymesh-healthcheck-libp2p
         target: /usr/local/bin/polymesh-healthcheck-libp2p.sh
     healthcheck:
-      test: ['CMD', '/usr/local/bin/polymesh-healthcheck-libp2p.sh']
+      test: ["CMD", "/usr/local/bin/polymesh-healthcheck-libp2p.sh"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -150,17 +149,17 @@ services:
       PORT: 3000
       POLYMESH_NODE_URL: ${POLYMESH_CHAIN_WS:-ws://polymesh-node:9944}
       POLYMESH_MIDDLEWARE_V2_URL: ${REST_MIDDLEWARE_URL:-http://subquery-graphql:3000}
-      AUTH_STRATEGY: 'open'
+      AUTH_STRATEGY: "open"
       DEVELOPER_UTILS: true
-      VAULT_URL: 'http://vault:8200/v1/transit'
+      VAULT_URL: "http://vault:8200/v1/transit"
     healthcheck:
       test:
         [
-          'CMD',
-          'wget',
-          '--spider',
-          '-q',
-          'http://polymesh-rest-api-vault-sm:3000/network/latest-block',
+          "CMD",
+          "wget",
+          "--spider",
+          "-q",
+          "http://polymesh-rest-api-vault-sm:3000/network/latest-block",
         ]
       interval: 30s
       timeout: 5s
@@ -172,7 +171,7 @@ services:
     depends_on:
       polymesh-rest-api-vault-sm:
         condition: service_healthy
-    restart: 'no'
+    restart: "no"
     entrypoint: /opt/polymesh-rest-api/init.sh
     networks:
       - polymesh
@@ -205,18 +204,18 @@ services:
       PORT: 3000
       POLYMESH_NODE_URL: ${POLYMESH_CHAIN_WS:-ws://polymesh-node:9944}
       POLYMESH_MIDDLEWARE_V2_URL: ${REST_MIDDLEWARE_URL:-http://subquery-graphql:3000}
-      LOCAL_SIGNERS: 'alice,bob,charlie'
-      LOCAL_MNEMONICS: '//Alice,//Bob,//Charlie'
-      AUTH_STRATEGY: 'open'
+      LOCAL_SIGNERS: "alice,bob,charlie"
+      LOCAL_MNEMONICS: "//Alice,//Bob,//Charlie"
+      AUTH_STRATEGY: "open"
       DEVELOPER_UTILS: true
     healthcheck:
       test:
         [
-          'CMD',
-          'wget',
-          '--spider',
-          '-q',
-          'http://polymesh-rest-api-local-sm:3000/network/latest-block',
+          "CMD",
+          "wget",
+          "--spider",
+          "-q",
+          "http://polymesh-rest-api-local-sm:3000/network/latest-block",
         ]
       interval: 30s
       timeout: 5s
@@ -243,9 +242,10 @@ services:
   # This will make sure vault is initialized and unsealed on the first run and unsealed on subsequent runs
   vault-init:
     image: hashicorp/vault:${VAULT_VERSION:-latest}
+    user: "0:0"
     networks:
       - polymesh
-    restart: 'no'
+    restart: "no"
     depends_on:
       vault:
         condition: service_started
@@ -256,7 +256,7 @@ services:
       - /vault/file
       - /vault/logs
     environment:
-      VAULT_ADDR: 'http://vault:8200'
+      VAULT_ADDR: "http://vault:8200"
       PGPASSWORD: postgres
       PGUSER: postgres
       PGDATABASE: services_status
@@ -301,7 +301,7 @@ services:
           exit 0
         fi
       '
-    restart: 'no'
+    restart: "no"
     networks:
       - polymesh
 
@@ -328,25 +328,25 @@ configs:
 volumes:
   psql-data:
     labels:
-      - 'network.polymesh.project=polymesh'
-      - 'network.polymesh.description=Indexer PostgreSQL data'
+      - "network.polymesh.project=polymesh"
+      - "network.polymesh.description=Indexer PostgreSQL data"
   chain-data:
     labels:
-      - 'network.polymesh.project=polymesh'
-      - 'network.polymesh.description=Polymesh chain data'
+      - "network.polymesh.project=polymesh"
+      - "network.polymesh.description=Polymesh chain data"
   vault-volume:
     labels:
-      - 'network.polymesh.project=polymesh'
-      - 'network.polymesh.description=Hashicorp Vault data'
+      - "network.polymesh.project=polymesh"
+      - "network.polymesh.description=Hashicorp Vault data"
   vault-log-volume:
     labels:
-      - 'network.polymesh.project=polymesh'
-      - 'network.polymesh.description=Hashicorp Vault logs'
+      - "network.polymesh.project=polymesh"
+      - "network.polymesh.description=Hashicorp Vault logs"
   vault-root-token:
     labels:
-      - 'network.polymesh.project=polymesh'
-      - 'network.polymesh.description=Hashicorp Vault root token'
+      - "network.polymesh.project=polymesh"
+      - "network.polymesh.description=Hashicorp Vault root token"
   rest-api-accounts-init:
     labels:
-      - 'network.polymesh.project=polymesh'
-      - 'network.polymesh.description=REST API signer init'
+      - "network.polymesh.project=polymesh"
+      - "network.polymesh.description=REST API signer init"

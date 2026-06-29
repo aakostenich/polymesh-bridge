@@ -1,6 +1,7 @@
 import { RestClient } from '~/rest/client';
 import { PostResult } from '~/rest/interfaces';
 import {
+  acceptSubsidyParams,
   createSubsidyParams,
   quitSubsidyParams,
   setSubsidyAllowanceParams,
@@ -13,6 +14,18 @@ export class Subsidy {
     params: ReturnType<typeof createSubsidyParams>
   ): Promise<Record<string, unknown>> {
     return this.client.post('/accounts/subsidy/create', params);
+  }
+
+  public async approveSubsidy(
+    params: ReturnType<typeof createSubsidyParams>
+  ): Promise<PostResult> {
+    return this.client.post('/accounts/subsidy/approve', params);
+  }
+
+  public async acceptSubsidy(
+    params: ReturnType<typeof acceptSubsidyParams>
+  ): Promise<PostResult> {
+    return this.client.post('/accounts/subsidy/accept', params);
   }
 
   public async getSubsidy(subsidizer: string, beneficiary: string): Promise<unknown> {

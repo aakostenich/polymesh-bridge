@@ -7,7 +7,7 @@ import { env } from '../environment';
 
 const maxWorkersSupported = 8;
 
-const startingPolyx = 500000;
+const startingPolyx = 100000;
 
 export default async (): Promise<void> => {
   const vaultClient = new VaultClient(env.vaultUrl, env.vaultTransitPath, env.vaultToken);
@@ -17,23 +17,11 @@ export default async (): Promise<void> => {
 
   const keys = await Promise.all(adminSigners.map((s) => vaultClient.createKey(s)));
 
-  const ids = await Promise.all(
-    keys.map(({ address }) => restClient.accounts.getIdentity(address))
-  );
+  const accounts = keys.map(({ address }) => ({
+    address,
+    initialPolyx: startingPolyx,
+  }));
 
-  // Filter accounts to only include those without existing identities
-  const accountsToCreate = keys
-    .map(({ address }, index) => ({
-      address,
-      initialPolyx: startingPolyx,
-      id: ids[index],
-    }))
-    .filter(({ id }) => !id)
-    .map(({ address, initialPolyx }) => ({ address, initialPolyx }));
-
-  if (accountsToCreate.length === 0) {
-    return;
-  }
-
-  await restClient.identities.createTestAdmins(accountsToCreate);
+  // Idempotent on v8: registers missing identities and (re)funds POLYX each run
+  await restClient.identities.createTestAdmins(accounts);
 };

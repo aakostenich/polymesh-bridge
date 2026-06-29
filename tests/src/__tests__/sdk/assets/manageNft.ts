@@ -5,6 +5,7 @@ import {
   DefaultPortfolio,
   Identity,
   Instruction,
+  InstructionStatus,
   KnownNftType,
   MetadataType,
   NftCollection,
@@ -202,8 +203,12 @@ describe('manageNft', () => {
   });
 
   it('should allow the receiver to accept an NFT settlement', async () => {
-    const affirmTx = await instruction.affirm({}, { signingAccount: receiverAddress });
-    await affirmTx.run();
+    const { status } = await instruction.details();
+
+    if (status !== InstructionStatus.Success) {
+      const affirmTx = await instruction.affirm({}, { signingAccount: receiverAddress });
+      await affirmTx.run();
+    }
 
     const receiverPortfolio = await receiver.portfolios.getPortfolio();
 

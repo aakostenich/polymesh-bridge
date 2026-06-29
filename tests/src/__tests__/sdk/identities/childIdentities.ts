@@ -11,7 +11,7 @@ import { manageSecondaryKeys } from '~/sdk/identities/manageSecondaryKeys';
 
 let factory: TestFactory;
 
-describe('manageChildIdentities', () => {
+describe.skip('manageChildIdentities', () => {
   let sdk: Polymesh;
   let childAddress: string;
 

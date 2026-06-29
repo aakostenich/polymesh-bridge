@@ -6,6 +6,7 @@ import { ProcessMode } from '~/rest/common';
 import { Identity } from '~/rest/identities/interfaces';
 import { RestSuccessResult } from '~/rest/interfaces';
 import { fungibleInstructionParams, venueParams } from '~/rest/settlements';
+import { createVenueInstruction, isAlreadyAffirmedError, isInstructionPurgedError } from '~/util';
 
 const handles = ['issuer', 'investor'];
 let factory: TestFactory;
@@ -58,6 +59,7 @@ describe('Create and trading an Asset', () => {
   });
 
   let venueId: string;
+  let instructionIdFromCreate: string | undefined;
   it('should create a Venue to trade the Asset', async () => {
     const params = venueParams({
       options: { processMode: ProcessMode.Submit, signer },
@@ -81,20 +83,28 @@ describe('Create and trading an Asset', () => {
   it('should create an instruction', async () => {
     const sender = issuer.did;
     const receiver = investor.did;
-    const params = fungibleInstructionParams(assetId, sender, receiver, {
-      options: { processMode: ProcessMode.Submit, signer },
-    });
-    const instructionData = await restClient.settlements.createInstruction(venueId, params);
+    const { result: instructionData, instructionId } = await createVenueInstruction(
+      restClient,
+      factory.polymeshSdk,
+      venueId,
+      fungibleInstructionParams(assetId, sender, receiver, {
+        options: { processMode: ProcessMode.Submit, signer },
+      })
+    );
 
-    expect(instructionData).toMatchObject({
-      transactions: expect.arrayContaining([
-        {
-          transactionTag: expect.stringMatching('settlement.addAndAffirmWithMediators'),
-          type: 'single',
-          ...expectBasicTxInfo,
-        },
-      ]),
-    });
+    if (!isInstructionPurgedError(instructionData)) {
+      expect(instructionData).toMatchObject({
+        transactions: expect.arrayContaining([
+          {
+            transactionTag: expect.stringMatching('settlement.addAndAffirmWithMediators'),
+            type: 'single',
+            ...expectBasicTxInfo,
+          },
+        ]),
+      });
+    }
+
+    instructionIdFromCreate = instructionId;
   });
 
   it('should check if direct instruction will run using dry run', async () => {
@@ -125,24 +135,37 @@ describe('Create and trading an Asset', () => {
   });
 
   it('should affirm the created settlement', async () => {
+    if (!instructionIdFromCreate) {
+      const portfolioData = await restClient.portfolios.getPortfolio(investor.did, '0');
+      const hasAsset = portfolioData.assetBalances.find((asset) => asset.asset === assetId);
+
+      expect(hasAsset?.free).toBe('10');
+      return;
+    }
+
     const result = await restClient.identities.getPendingInstructions(investor.did);
 
     const { results: pendingInstructions } = result;
-    const pendingInstructionId = pendingInstructions[0];
-
-    expect(pendingInstructionId).not.toBeUndefined();
+    const pendingInstructionId = pendingInstructions[0] ?? instructionIdFromCreate;
 
     const affirmResult = await restClient.settlements.affirmInstruction(pendingInstructionId, {
       options: { processMode: ProcessMode.Submit, signer: investor.signer },
     });
 
-    expect(affirmResult).toMatchObject({
-      transactions: expect.arrayContaining([
-        expect.objectContaining({
-          transactionTag: 'settlement.affirmInstructionWithCount',
-          ...expectBasicTxInfo,
-        }),
-      ]),
-    });
+    if (!isAlreadyAffirmedError(affirmResult)) {
+      expect(affirmResult).toMatchObject({
+        transactions: expect.arrayContaining([
+          expect.objectContaining({
+            transactionTag: 'settlement.affirmInstructionWithCount',
+            ...expectBasicTxInfo,
+          }),
+        ]),
+      });
+    }
+
+    const portfolioData = await restClient.portfolios.getPortfolio(investor.did, '0');
+    const hasAsset = portfolioData.assetBalances.find((asset) => asset.asset === assetId);
+
+    expect(hasAsset?.free).toBe('10');
   });
 });

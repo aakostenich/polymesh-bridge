@@ -4,9 +4,10 @@ import { Polymesh } from '@polymeshassociation/polymesh-sdk';
 import { env } from '~/environment';
 import { TestFactoryOpts } from '~/helpers/types';
 import { RestClient } from '~/rest';
+import { ProcessMode } from '~/rest/common';
 import { Identity } from '~/rest/identities';
-import { ResultSet } from '~/rest/interfaces';
-import { alphabet, randomNonce } from '~/util';
+import { RestErrorResult, ResultSet } from '~/rest/interfaces';
+import { alphabet, isChainV7, randomNonce } from '~/util';
 import { VaultClient } from '~/vault';
 
 const nonceLength = 9;
@@ -42,7 +43,7 @@ export class TestFactory {
 
     await factory.setupSdk();
 
-    if (signers) {
+    if (signers?.length) {
       await factory.initIdentities(signers);
     }
 
@@ -91,15 +92,7 @@ export class TestFactory {
       signers.push(signer);
     }
 
-    const accounts = addresses.map((address) => ({
-      address,
-      initialPolyx: startingPolyx,
-    }));
-
-    const { results } = await this.restClient.identities.createTestAccounts(
-      accounts,
-      this.readAdminSigner()
-    );
+    const { results } = await this.fundTestAccounts(addresses);
 
     results.forEach((identity, index) => {
       const signer = signers[index];
@@ -112,12 +105,97 @@ export class TestFactory {
   }
 
   public async createIdentityForAddresses(addresses: string[]): Promise<ResultSet<Identity>> {
+    if (!isChainV7(this.polymeshSdk)) {
+      await this.prefundAddresses(addresses);
+      await this.selfRegisterAddresses(addresses);
+      await this.fundTestAccountsFromAdmin(addresses);
+
+      const results = await Promise.all(
+        addresses.map(async (address) => {
+          const { identity } = await this.restClient.get<{ identity: Identity }>(
+            `/accounts/${address}`
+          );
+
+          if (!identity) {
+            throw new Error(`Identity was not found for ${address} after registration`);
+          }
+
+          return identity;
+        })
+      );
+
+      return { results, total: String(results.length) };
+    }
+
+    return this.fundTestAccounts(addresses);
+  }
+
+  private async prefundAddresses(addresses: string[]): Promise<void> {
+    if (!addresses.length) {
+      return;
+    }
+
+    await this.restClient.post('/developer-testing/prefund-accounts', {
+      accounts: addresses.map((address) => ({ address, initialPolyx: 0 })),
+      signer: this.readAdminSigner(),
+    });
+  }
+
+  private async selfRegisterAddresses(addresses: string[]): Promise<void> {
+    for (const address of addresses) {
+      const account = await this.polymeshSdk.accountManagement.getAccount({ address });
+      const existingIdentity = await account.getIdentity();
+
+      if (!existingIdentity) {
+        const registerTx = await this.polymeshSdk.identities.selfRegisterDid({
+          signingAccount: address,
+        });
+        await registerTx.run();
+
+        if (!registerTx.isSuccess) {
+          throw new Error(`Failed to self-register DID for ${address}`);
+        }
+      }
+    }
+  }
+
+  private async fundTestAccounts(addresses: string[]): Promise<ResultSet<Identity>> {
     const accounts = addresses.map((address) => ({
       address,
       initialPolyx: startingPolyx,
     }));
 
-    return this.restClient.identities.createTestAccounts(accounts, this.readAdminSigner());
+    const result = (await this.restClient.identities.createTestAccounts(
+      accounts,
+      this.readAdminSigner()
+    )) as ResultSet<Identity> | RestErrorResult;
+
+    if ('statusCode' in result && result.statusCode >= 400) {
+      throw new Error(`createTestAccounts failed (${result.statusCode}): ${result.message}`);
+    }
+
+    if (!('results' in result) || !result.results?.length) {
+      throw new Error(
+        `createTestAccounts returned no identities for addresses: ${addresses.join(', ')}`
+      );
+    }
+
+    return result;
+  }
+
+  private async fundTestAccountsFromAdmin(addresses: string[]): Promise<void> {
+    const adminSigner = this.readAdminSigner();
+
+    for (const address of addresses) {
+      await this.restClient.post('/accounts/transfer', {
+        to: address,
+        amount: String(startingPolyx),
+        options: {
+          signer: adminSigner,
+          processMode: ProcessMode.Submit,
+        },
+      });
+    }
   }
 
   public getSignerIdentity(handle: string): Identity {
@@ -161,13 +239,26 @@ export class TestFactory {
 
     const addresses = await this.signingManager.getAccounts();
 
-    const accounts = addresses.map((address) => ({
-      address,
-      initialPolyx: startingPolyx,
-    }));
+    if (isChainV7(this.polymeshSdk)) {
+      await this.fundTestAccounts(addresses);
+      return;
+    }
 
-    // note this is inefficient and should be batched with given identities to be made
-    await this.restClient.identities.createTestAccounts(accounts, this.readAdminSigner());
+    const [address] = addresses;
+
+    await this.restClient.post('/developer-testing/prefund-accounts', {
+      accounts: [{ address, initialPolyx: 0 }],
+      signer: this.readAdminSigner(),
+    });
+
+    const registerTx = await this.polymeshSdk.identities.selfRegisterDid({ signingAccount: address });
+    await registerTx.run();
+
+    if (!registerTx.isSuccess) {
+      throw new Error(`Failed to self-register SDK signing account ${address}`);
+    }
+
+    await this.fundTestAccountsFromAdmin([address]);
   }
 
   private async cleanupIdentities(): Promise<void> {

@@ -96,14 +96,7 @@ export const manageClaims = async (
 
   await awaitMiddlewareSynced(editClaimTx, sdk, 15, 2000);
 
-  // This following portion demonstrates different ways to fetch claims
-
-  // Note, without specifying `target` the signingIdentity claims will be fetched
-  const signerCddClaims = await sdk.claims.getCddClaims();
-  assert(
-    signerCddClaims.length > 0,
-    'The signing Identity should have at least one Customer Due Diligence claim'
-  );
+  // CDD claim queries are only supported on chain v7 (deprecated on v8)
 
   // `target` can specify which Identity to fetch Claims for
   const targetingClaims = await sdk.claims.getTargetingClaims({
@@ -134,9 +127,4 @@ export const manageClaims = async (
   assert(Array.isArray(claimScopes));
   expect(claimScopes.length).toBeGreaterThan(0);
   expect(claimScopes[0].scope).toBeDefined();
-
-  // get cdd claims
-  const cddClaims = await sdk.claims.getCddClaims({ target: targetDid });
-  assert(Array.isArray(cddClaims));
-  expect(cddClaims.length).toBe(1);
 };

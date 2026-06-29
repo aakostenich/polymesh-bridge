@@ -99,6 +99,7 @@ export const tradeOffChainAssets = async (
         metadata: `Optional metadata for leg ${index}`,
         signer: signer,
         signerKeyRingType: SignerKeyRingType.Sr25519, // this is the default value as well
+        expiresAt: new Date('2055/01/01'),
       })
     )
   );

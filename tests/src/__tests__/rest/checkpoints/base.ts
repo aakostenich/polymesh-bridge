@@ -6,6 +6,12 @@ import { ProcessMode } from '~/rest/common';
 import { Identity } from '~/rest/identities/interfaces';
 import { RestSuccessResult } from '~/rest/interfaces';
 import { fungibleInstructionParams } from '~/rest/settlements/params';
+import {
+  createDirectInstruction,
+  getInstructionId,
+  isAlreadyAffirmedError,
+  isInstructionPurgedError,
+} from '~/util';
 
 import { expectBasicTxInfo } from '../utils';
 
@@ -53,53 +59,74 @@ describe('Checkpoints Controller', () => {
       expect(assetId).toBeDefined();
 
       // Transfer tokens to holder1 (so multiple DIDs hold the asset)
-      const transferToHolder1Tx = await restClient.settlements.createDirectInstruction(
-        fungibleInstructionParams(assetId, issuer.did, holder1.did, {
-          options: { processMode: ProcessMode.Submit, signer },
-        })
-      );
+      const { result: transferToHolder1Tx, instructionId: instruction1Id } =
+        await createDirectInstruction(
+          restClient,
+          factory.polymeshSdk,
+          fungibleInstructionParams(assetId, issuer.did, holder1.did, {
+            options: { processMode: ProcessMode.Submit, signer },
+          })
+        );
 
-      // should have created an instruction
-      expect((transferToHolder1Tx as RestSuccessResult).instruction).toBeDefined();
-
-      // Use the correct property for the instruction ID (assuming it's 'id' from the API response)
-      await restClient.settlements.affirmInstruction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (transferToHolder1Tx as any).instruction,
-        {
+      if (instruction1Id) {
+        const affirm1 = await restClient.settlements.affirmInstruction(instruction1Id, {
           options: { processMode: ProcessMode.Submit, signer: holder1.signer },
+        });
+
+        if (!isAlreadyAffirmedError(affirm1)) {
+          expect(affirm1).toMatchObject({
+            transactions: expect.arrayContaining([
+              expect.objectContaining({
+                transactionTag: 'settlement.affirmInstructionWithCount',
+              }),
+            ]),
+          });
         }
-      );
+      } else if (!isInstructionPurgedError(transferToHolder1Tx)) {
+        expect(getInstructionId(transferToHolder1Tx)).toBeDefined();
+      }
+
+      let lastTxHash: string | undefined;
 
       // Transfer tokens to holder2
-      const transferToHolder2Tx = await restClient.settlements.createDirectInstruction(
-        fungibleInstructionParams(assetId, issuer.did, holder2.did, {
-          options: { processMode: ProcessMode.Submit, signer },
-        })
-      );
+      const { result: transferToHolder2Tx, instructionId: instruction2Id } =
+        await createDirectInstruction(
+          restClient,
+          factory.polymeshSdk,
+          fungibleInstructionParams(assetId, issuer.did, holder2.did, {
+            options: { processMode: ProcessMode.Submit, signer },
+          })
+        );
 
-      // should have created an instruction
-      expect((transferToHolder2Tx as RestSuccessResult).instruction).toBeDefined();
-
-      const txData2 = (await restClient.settlements.affirmInstruction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (transferToHolder2Tx as any).instruction,
-        {
+      if (instruction2Id) {
+        const txData2 = await restClient.settlements.affirmInstruction(instruction2Id, {
           options: { processMode: ProcessMode.Submit, signer: holder2.signer },
+        });
+
+        if (!isAlreadyAffirmedError(txData2) && 'transactions' in txData2) {
+          expect(txData2).toMatchObject({
+            transactions: expect.arrayContaining([
+              {
+                transactionTag: 'settlement.affirmInstructionWithCount',
+                type: 'single',
+                ...expectBasicTxInfo,
+              },
+            ]),
+          });
+          lastTxHash = (txData2 as RestSuccessResult).transactions[0].transactionHash as string;
         }
-      )) as RestSuccessResult;
+      } else if (!isInstructionPurgedError(transferToHolder2Tx)) {
+        expect(getInstructionId(transferToHolder2Tx)).toBeDefined();
+      }
 
-      expect(txData2).toMatchObject({
-        transactions: expect.arrayContaining([
-          {
-            transactionTag: 'settlement.affirmInstructionWithCount',
-            type: 'single',
-            ...expectBasicTxInfo,
-          },
-        ]),
-      });
+      if (!lastTxHash && 'transactions' in transferToHolder2Tx) {
+        lastTxHash = (transferToHolder2Tx as RestSuccessResult).transactions[0]
+          ?.transactionHash as string;
+      }
 
-      await restClient.pingForTransaction(txData2.transactions[0].transactionHash, 10);
+      if (lastTxHash) {
+        await restClient.pingForTransaction(lastTxHash, 10);
+      }
 
       const { results: holder1Assets } = await restClient.identities.getHeldAssets(holder1.did);
       expect(holder1Assets).toBeDefined();

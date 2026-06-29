@@ -21,6 +21,13 @@ export const setSubsidyAllowanceParams = (
     ...base,
   } as const);
 
+export const acceptSubsidyParams = (subsidizer: string, base: TxBase, extras: TxExtras = {}) =>
+  ({
+    subsidizer,
+    ...extras,
+    ...base,
+  } as const);
+
 export const quitSubsidyParams = (subsidizer: string, base: TxBase, extras: TxExtras = {}) =>
   ({
     subsidizer,
