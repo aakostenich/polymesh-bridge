@@ -48,7 +48,7 @@ create_identity() {
     \"accounts\": [
       {
         \"address\": \"$user_address\",
-        \"initialPolyx\": 100000
+        \"initialPolyx\": 1000000
       }
     ]
   }" | jq -r .results[0].did )
