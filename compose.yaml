@@ -109,6 +109,7 @@ services:
       - --no-telemetry
       - --pruning=archive
       - --no-mdns
+      # - --unsafe-force-node-key-generation
       - --validator
       - --rpc-cors=all
       - --rpc-methods=unsafe
