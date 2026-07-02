@@ -12,7 +12,7 @@ const assetType = 'EquityCommon';
 
 const defaultAssetParams = {
   assetType,
-  initialSupply: '100000',
+  initialSupply: '10000',
   isDivisible: false,
   requireInvestorUniqueness: false,
   securityIdentifiers: [{ type: 'Isin', value: 'US0846707026' }],

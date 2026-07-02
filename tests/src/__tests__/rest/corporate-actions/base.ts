@@ -1,5 +1,6 @@
 import { BigNumber } from '@polymeshassociation/polymesh-sdk';
 import { TargetTreatment } from '@polymeshassociation/polymesh-sdk/types';
+
 import { TestFactory } from '~/helpers';
 import { RestClient } from '~/rest';
 import { createAssetParams } from '~/rest/assets/params';

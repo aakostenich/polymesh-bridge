@@ -4,8 +4,7 @@ import {
   OfferingBalanceStatus,
   OfferingSaleStatus,
   OfferingTimingStatus,
-  SignerKeyRingType,
-  VenueType,
+  VenueType
 } from '@polymeshassociation/polymesh-sdk/types';
 import assert from 'node:assert';
 

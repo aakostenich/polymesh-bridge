@@ -136,7 +136,7 @@ export class TestFactory {
     }
 
     await this.restClient.post('/developer-testing/prefund-accounts', {
-      accounts: addresses.map((address) => ({ address, initialPolyx: 0 })),
+      accounts: addresses.map((address) => ({ address, initialPolyx: 1000 })),
       signer: this.readAdminSigner(),
     });
   }
@@ -247,11 +247,13 @@ export class TestFactory {
     const [address] = addresses;
 
     await this.restClient.post('/developer-testing/prefund-accounts', {
-      accounts: [{ address, initialPolyx: 0 }],
+      accounts: [{ address, initialPolyx: 1000 }],
       signer: this.readAdminSigner(),
     });
 
-    const registerTx = await this.polymeshSdk.identities.selfRegisterDid({ signingAccount: address });
+    const registerTx = await this.polymeshSdk.identities.selfRegisterDid({
+      signingAccount: address,
+    });
     await registerTx.run();
 
     if (!registerTx.isSuccess) {

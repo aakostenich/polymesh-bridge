@@ -8,7 +8,12 @@ import { ProcessMode } from '~/rest/common';
 import { Identity } from '~/rest/identities/interfaces';
 import { RestSuccessResult } from '~/rest/interfaces';
 import { fungibleInstructionParams, venueParams } from '~/rest/settlements';
-import { awaitMiddlewareSyncedForRestApi, isAlreadyAffirmedError, isRestError, withPendingInstructionBlock } from '~/util';
+import {
+  awaitMiddlewareSyncedForRestApi,
+  isAlreadyAffirmedError,
+  isRestError,
+  withPendingInstructionBlock,
+} from '~/util';
 
 const handles = ['issuer', 'investor'];
 let factory: TestFactory;
@@ -133,14 +138,10 @@ describe('Settlements - REST API (Manual Settlement Flow)', () => {
   });
 
   it('should create a settlement instruction', async () => {
-    const params = await withPendingInstructionBlock(
-      restClient,
-      factory.polymeshSdk,
-      {
-        ...createInstructionParams,
-        options: { processMode: ProcessMode.Submit, signer },
-      }
-    );
+    const params = await withPendingInstructionBlock(restClient, factory.polymeshSdk, {
+      ...createInstructionParams,
+      options: { processMode: ProcessMode.Submit, signer },
+    });
 
     const createInstructionTx = await restClient.settlements.createInstruction(venueId, params);
 

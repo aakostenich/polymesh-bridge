@@ -147,8 +147,7 @@ type PolymeshWithContext = Polymesh & {
   context: { isV7: boolean };
 };
 
-export const isChainV7 = (sdk: Polymesh): boolean =>
-  (sdk as PolymeshWithContext).context.isV7;
+export const isChainV7 = (sdk: Polymesh): boolean => (sdk as PolymeshWithContext).context.isV7;
 
 export const isRestError = (
   result: unknown

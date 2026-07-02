@@ -72,9 +72,7 @@ export class Settlements {
     });
   }
 
-  public async getAffirmations(
-    instructionId: string
-  ): Promise<
+  public async getAffirmations(instructionId: string): Promise<
     ResultSet<{
       identity?: string;
       party?: { did?: string; address?: string; type?: string };

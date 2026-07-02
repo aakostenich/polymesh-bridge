@@ -16,8 +16,7 @@ import {
   createVenueInstruction,
   getInstructionId,
   isAlreadyAffirmedError,
-  isInstructionPurgedError,
-  isRestError,
+  isInstructionPurgedError
 } from '~/util';
 
 const handles = ['issuer', 'blocked', 'investor'];

@@ -249,6 +249,8 @@ services:
     depends_on:
       vault:
         condition: service_started
+      postgres:
+        condition: service_healthy
     volumes:
       - vault-root-token:/vault-token:rw
     # This will prevent the container from creating additional volumes

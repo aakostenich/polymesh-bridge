@@ -5,7 +5,12 @@ import { ProcessMode } from '~/rest/common';
 import { Identity } from '~/rest/identities/interfaces';
 import { createNftCollectionParams, issueNftParams } from '~/rest/nfts';
 import { nftInstructionParams, venueParams } from '~/rest/settlements';
-import { awaitMiddlewareSyncedForRestApi, createVenueInstruction, isAlreadyAffirmedError, isInstructionPurgedError } from '~/util';
+import {
+  awaitMiddlewareSyncedForRestApi,
+  createVenueInstruction,
+  isAlreadyAffirmedError,
+  isInstructionPurgedError,
+} from '~/util';
 
 const handles = ['issuer', 'collector'];
 let factory: TestFactory;

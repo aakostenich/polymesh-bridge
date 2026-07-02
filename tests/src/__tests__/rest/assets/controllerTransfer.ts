@@ -81,7 +81,7 @@ describe('Fungible AssetController transfer', () => {
     expect(results).toContainEqual(
       expect.objectContaining({
         identity: issuer.did,
-        balance: '99990',
+        balance: '9990',
       })
     );
     expect(results).toContainEqual(
@@ -117,7 +117,7 @@ describe('Fungible AssetController transfer', () => {
       expect.arrayContaining([
         {
           identity: issuer.did,
-          balance: '100000',
+          balance: '10000',
         },
       ])
     );

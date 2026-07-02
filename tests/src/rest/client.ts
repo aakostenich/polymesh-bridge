@@ -89,7 +89,9 @@ export class RestClient {
 
     if (!response.ok) {
       return {
-        ...(typeof payload === 'object' && payload !== null ? payload : { message: String(payload) }),
+        ...(typeof payload === 'object' && payload !== null
+          ? payload
+          : { message: String(payload) }),
         statusCode: response.status,
         error:
           (typeof payload === 'object' && payload !== null && 'error' in payload

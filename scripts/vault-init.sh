@@ -16,6 +16,21 @@ set_status() {
   psql -c "INSERT INTO status (service_name, service_available) VALUES ('vault', $1) ON CONFLICT (service_name) DO UPDATE SET service_available = EXCLUDED.service_available" > /dev/null
 }
 
+wait_for_postgres() {
+    SECONDS_DELTA=$SECONDS
+    while [[ $(($SECONDS - $SECONDS_DELTA)) -lt "$TIMEOUT_SECONDS" ]]; do
+        if psql -c "SELECT 1" > /dev/null 2>&1; then
+            echo "Postgres is ready"
+            return 0
+        fi
+        sleep 1
+    done
+
+    >&2 echo "Timed out waiting for Postgres to become ready"
+    return 1
+}
+
+wait_for_postgres
 set_status "false"
 
 initialize_vault() {
