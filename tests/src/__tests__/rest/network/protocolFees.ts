@@ -1,17 +1,11 @@
-import { TestFactory } from '~/helpers';
+import { env } from '~/environment';
 import { RestClient } from '~/rest';
 
 describe('Network Protocol Fees', () => {
-  let factory: TestFactory;
   let restClient: RestClient;
 
-  beforeAll(async () => {
-    factory = await TestFactory.create({ handles: [] });
-    ({ restClient } = factory);
-  });
-
-  afterAll(async () => {
-    await factory.close();
+  beforeAll(() => {
+    restClient = new RestClient(env.restApi);
   });
 
   describe('GET /network/protocol-fees', () => {

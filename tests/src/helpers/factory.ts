@@ -11,7 +11,7 @@ import { alphabet, isChainV7, randomNonce } from '~/util';
 import { VaultClient } from '~/vault';
 
 const nonceLength = 9;
-const startingPolyx = 20000;
+const startingPolyx = 100000;
 const { nodeUrl, vaultUrl, vaultToken, vaultTransitPath } = env;
 
 export class TestFactory {
@@ -25,7 +25,7 @@ export class TestFactory {
   #adminSigner = '';
   #portfolioIndex = 0;
 
-  public static async create(opts: TestFactoryOpts): Promise<TestFactory> {
+  public static async create(opts: TestFactoryOpts = {}): Promise<TestFactory> {
     const { handles: signers } = opts;
 
     const middlewareV2 = {

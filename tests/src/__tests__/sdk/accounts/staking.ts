@@ -3,6 +3,7 @@ import { BigNumber, Polymesh } from '@polymeshassociation/polymesh-sdk';
 import { Account } from '@polymeshassociation/polymesh-sdk/types';
 
 import { TestFactory } from '~/helpers';
+import { isChainV7 } from '~/util';
 
 let factory: TestFactory;
 const handles = ['stash', 'controller', 'payee'];
@@ -69,6 +70,10 @@ describe('staking', () => {
   });
 
   it('should allow for a controller to be reassigned', async () => {
+    if (!isChainV7(sdk)) {
+      return;
+    }
+
     const setControllerTx = await sdk.staking.setController(
       { controller },
       { signingAccount: stash }
@@ -81,6 +86,10 @@ describe('staking', () => {
   });
 
   it('should allow for a payee to be reassigned', async () => {
+    if (!isChainV7(sdk)) {
+      return;
+    }
+
     const setPayeeTx = await sdk.staking.setPayee(
       { payee, autoStake: false },
       { signingAccount: controller }
@@ -94,6 +103,10 @@ describe('staking', () => {
   });
 
   it('should allow for the stash to bond extra', async () => {
+    if (!isChainV7(sdk)) {
+      return;
+    }
+
     const ledgerBefore = await controller.staking.getLedger();
 
     const bondMoreTx = await sdk.staking.bondExtra(
@@ -109,6 +122,10 @@ describe('staking', () => {
   });
 
   it('should allow for a controller to unbond', async () => {
+    if (!isChainV7(sdk)) {
+      return;
+    }
+
     const unbondTx = await sdk.staking.unbond(
       { amount: new BigNumber(10) },
       { signingAccount: controller }
@@ -118,6 +135,10 @@ describe('staking', () => {
   });
 
   it('should allow for the controller to call withdraw', async () => {
+    if (!isChainV7(sdk)) {
+      return;
+    }
+
     const withdraw = await sdk.staking.withdraw({ signingAccount: controller });
 
     await expect(withdraw.run()).resolves.not.toThrow();

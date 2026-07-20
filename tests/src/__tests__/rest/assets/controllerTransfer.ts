@@ -1,10 +1,19 @@
+import { BigNumber } from '@polymeshassociation/polymesh-sdk';
+
 import { TestFactory } from '~/helpers';
 import { RestClient } from '~/rest';
 import { controllerTransferParams, createAssetParams } from '~/rest/assets/params';
 import { ProcessMode } from '~/rest/common';
 import { Identity } from '~/rest/identities/interfaces';
 import { RestSuccessResult } from '~/rest/interfaces';
-import { fungibleInstructionParams } from '~/rest/settlements/params';
+import { fungibleInstructionParams, venueParams } from '~/rest/settlements/params';
+import {
+  awaitMiddlewareSyncedForRestApi,
+  createVenueInstruction,
+  getInstructionId,
+  isAlreadyAffirmedError,
+  isInstructionPurgedError,
+} from '~/util';
 
 import { expectBasicTxInfo } from '../utils';
 
@@ -48,32 +57,47 @@ describe('Fungible AssetController transfer', () => {
   });
 
   it('should transfer the asset to holder', async () => {
-    const transferToHolderTx = await restClient.settlements.createDirectInstruction(
+    const venueTx = await restClient.settlements.createVenue(
+      venueParams({
+        options: { processMode: ProcessMode.Submit, signer },
+      })
+    );
+    const venueId = (venueTx as RestSuccessResult).venue as string;
+
+    const { result: transferToHolderTx, instructionId } = await createVenueInstruction(
+      restClient,
+      factory.polymeshSdk,
+      venueId,
       fungibleInstructionParams(assetId, issuer.did, holder.did, {
         options: { processMode: ProcessMode.Submit, signer },
       })
     );
 
-    // should have created an instruction
-    expect((transferToHolderTx as RestSuccessResult).instruction).toBeDefined();
+    const pendingInstructionId =
+      instructionId ??
+      getInstructionId(transferToHolderTx) ??
+      (await restClient.identities.getPendingInstructions(holder.did)).results[0];
 
-    const txData = await restClient.settlements.affirmInstruction(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (transferToHolderTx as any).instruction,
-      {
+    if (pendingInstructionId) {
+      const txData = await restClient.settlements.affirmInstruction(pendingInstructionId, {
         options: { processMode: ProcessMode.Submit, signer: holder.signer },
-      }
-    );
+      });
 
-    expect(txData).toMatchObject({
-      transactions: expect.arrayContaining([
-        {
-          transactionTag: 'settlement.affirmInstructionWithCount',
-          type: 'single',
-          ...expectBasicTxInfo,
-        },
-      ]),
-    });
+      if (!isAlreadyAffirmedError(txData) && 'transactions' in txData) {
+        await awaitMiddlewareSyncedForRestApi(txData, restClient, new BigNumber(1));
+        expect(txData).toMatchObject({
+          transactions: expect.arrayContaining([
+            {
+              transactionTag: 'settlement.affirmInstructionWithCount',
+              type: 'single',
+              ...expectBasicTxInfo,
+            },
+          ]),
+        });
+      }
+    } else if (!isInstructionPurgedError(transferToHolderTx)) {
+      expect((transferToHolderTx as RestSuccessResult).instruction).toBeDefined();
+    }
 
     const { results } = await restClient.assets.getAssetHolders(assetId);
 

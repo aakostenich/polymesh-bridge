@@ -1,9 +1,10 @@
 import { BigNumber, Polymesh } from '@polymeshassociation/polymesh-sdk';
-import { KnownNftType, MetadataType } from '@polymeshassociation/polymesh-sdk/types';
+import { KnownNftType, MetadataType, VenueType } from '@polymeshassociation/polymesh-sdk/types';
 import assert from 'node:assert';
 
 import { createAsset } from '~/sdk/assets/createAsset';
 import { createNftCollection } from '~/sdk/assets/createNftCollection';
+import { awaitMiddlewareSynced, getPendingInstructionEndBlock, sleep } from '~/util';
 
 /*
   This script showcases VenueFiltering related functionality. It:
@@ -29,16 +30,34 @@ export const fungibleAssetControllerTransfer = async (
   assert(signerIdentity);
   const { account: counterPartyAccount } = await counterParty.getPrimaryAccount();
 
-  const transferTx = await sdk.settlements.addInstruction({
+  const endBlock = await getPendingInstructionEndBlock(sdk);
+
+  const venueTx = await sdk.settlements.createVenue({
+    description: 'Controller transfer venue',
+    type: VenueType.Exchange,
+  });
+  const venue = await venueTx.run();
+  assert(venueTx.isSuccess);
+
+  const transferTx = await venue.addInstruction({
     legs: [{ asset, from: signerIdentity, to: targetDid, amount: new BigNumber(1000) }],
-    venueId: undefined,
+    endBlock,
   });
   const instruction = await transferTx.run();
   assert(transferTx.isSuccess);
 
+  await awaitMiddlewareSynced(transferTx, sdk, 30, 3000);
+
   // affirm instruction
-  const { pending } = await counterParty.getInstructions();
-  const counterInstruction = pending.find(({ id }) => id.eq(instruction.id));
+  let counterInstruction;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const { pending } = await counterParty.getInstructions();
+    counterInstruction = pending.find(({ id }) => id.eq(instruction.id));
+    if (counterInstruction) {
+      break;
+    }
+    await sleep(2000);
+  }
   assert(counterInstruction, 'the counter party should have the instruction as pending');
 
   const affirmTx = await counterInstruction.affirm({}, { signingAccount: counterPartyAccount });
@@ -128,12 +147,23 @@ export const nonFungibleAssetControllerTransfer = async (
 
   const nft2 = await issueTx2.run();
 
-  const transferTx = await sdk.settlements.addInstruction({
+  const endBlock = await getPendingInstructionEndBlock(sdk);
+
+  const venueTx = await sdk.settlements.createVenue({
+    description: 'Controller transfer venue',
+    type: VenueType.Exchange,
+  });
+  const venue = await venueTx.run();
+  assert(venueTx.isSuccess);
+
+  const transferTx = await venue.addInstruction({
     legs: [{ asset: collection, nfts: [nft, nft2], from: signerIdentity, to: targetDid }],
-    venueId: undefined,
+    endBlock,
   });
   const instruction = await transferTx.run();
   assert(transferTx.isSuccess);
+
+  await awaitMiddlewareSynced(transferTx, sdk);
 
   // affirm instruction
   const { pending } = await counterParty.getInstructions();

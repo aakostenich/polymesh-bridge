@@ -1,17 +1,11 @@
-import { TestFactory } from '~/helpers';
+import { env } from '~/environment';
 import { RestClient } from '~/rest';
 
 describe('Accounts Treasury Balance', () => {
-  let factory: TestFactory;
   let restClient: RestClient;
 
-  beforeAll(async () => {
-    factory = await TestFactory.create({ handles: [] });
-    ({ restClient } = factory);
-  });
-
-  afterAll(async () => {
-    await factory.close();
+  beforeAll(() => {
+    restClient = new RestClient(env.restApi);
   });
 
   describe('GET /accounts/treasury/balance', () => {
@@ -21,7 +15,7 @@ describe('Accounts Treasury Balance', () => {
       expect(treasuryBalance).toBeDefined();
       expect(treasuryBalance).toHaveProperty('balance');
       expect(typeof treasuryBalance.balance).toBe('string');
-      expect(treasuryBalance.balance).toMatch(/^\d+$/); // Should be a numeric string
+      expect(treasuryBalance.balance).toMatch(/^\d+$/);
     });
   });
 });

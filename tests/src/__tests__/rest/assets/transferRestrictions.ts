@@ -17,8 +17,14 @@ import {
 import { ProcessMode } from '~/rest/common';
 import { Identity } from '~/rest/identities/interfaces';
 import { RestSuccessResult } from '~/rest/interfaces';
-import { fungibleInstructionParams } from '~/rest/settlements';
-import { awaitMiddlewareSyncedForRestApi } from '~/util';
+import { fungibleInstructionParams, venueParams } from '~/rest/settlements';
+import {
+  awaitMiddlewareSyncedForRestApi,
+  createVenueInstruction,
+  getInstructionId,
+  isAlreadyAffirmedError,
+  isInstructionPurgedError,
+} from '~/util';
 
 const handles = ['issuer', 'investor', 'investor2'];
 let factory: TestFactory;
@@ -32,6 +38,7 @@ describe('AssetTransferRestrictions', () => {
   let investor: Identity;
   let investor2: Identity;
   let assetId: string;
+  let venueId: string;
   const statsToEnable: Array<{
     type: StatType;
     count?: string;
@@ -85,6 +92,13 @@ describe('AssetTransferRestrictions', () => {
       issueAssetParams(1000, { options: { processMode: ProcessMode.Submit, signer: issuerSigner } })
     );
     await awaitMiddlewareSyncedForRestApi(issueTx, restClient);
+
+    const venueTx = await restClient.settlements.createVenue(
+      venueParams({
+        options: { processMode: ProcessMode.Submit, signer: issuerSigner },
+      })
+    );
+    venueId = (venueTx as RestSuccessResult).venue as string;
   });
 
   afterAll(async () => {
@@ -95,6 +109,37 @@ describe('AssetTransferRestrictions', () => {
     return fungibleInstructionParams(assetId, issuer.did, recipient.did, {
       options: { processMode: ProcessMode.Submit, signer: issuerSigner },
     });
+  };
+
+  const transferTo = async (recipient: Identity, recipientSigner: string): Promise<void> => {
+    const { result, instructionId, autoSettled } = await createVenueInstruction(
+      restClient,
+      factory.polymeshSdk,
+      venueId,
+      buildInstructionParams(recipient)
+    );
+
+    const pendingInstructionId =
+      instructionId ??
+      getInstructionId(result) ??
+      (await restClient.identities.getPendingInstructions(recipient.did)).results[0];
+
+    if (pendingInstructionId) {
+      const affirmResult = await restClient.settlements.affirmInstruction(pendingInstructionId, {
+        options: { processMode: ProcessMode.Submit, signer: recipientSigner },
+      });
+
+      if (!isAlreadyAffirmedError(affirmResult) && 'transactions' in affirmResult) {
+        await awaitMiddlewareSyncedForRestApi(affirmResult, restClient, new BigNumber(1));
+      }
+      return;
+    }
+
+    if (autoSettled || isInstructionPurgedError(result)) {
+      return;
+    }
+
+    throw new Error('Expected instruction id or auto-settled transfer');
   };
 
   it('should set transfer restriction stats for the Asset', async () => {
@@ -177,15 +222,7 @@ describe('AssetTransferRestrictions', () => {
   });
 
   it('should allow transfers within the count threshold', async () => {
-    const instructionResult = await restClient.settlements.createDirectInstruction(
-      buildInstructionParams(investor)
-    );
-
-    const { instruction } = instructionResult as RestSuccessResult & { instruction: string };
-
-    await restClient.settlements.affirmInstruction(instruction, {
-      options: { processMode: ProcessMode.Submit, signer: investorSigner },
-    });
+    await transferTo(investor, investorSigner);
 
     const { results } = await restClient.assets.getAssetHolders(assetId);
 
@@ -193,16 +230,25 @@ describe('AssetTransferRestrictions', () => {
   });
 
   it('should block transfers that violate the count restriction', async () => {
-    const instructionParams = buildInstructionParams(investor2);
-    const instructionResult = await restClient.settlements.createDirectInstruction(
-      instructionParams
+    const { result, instructionId } = await createVenueInstruction(
+      restClient,
+      factory.polymeshSdk,
+      venueId,
+      buildInstructionParams(investor2)
     );
 
-    const { instruction } = instructionResult as RestSuccessResult & { instruction: string };
+    const pendingInstructionId =
+      instructionId ??
+      getInstructionId(result) ??
+      (await restClient.identities.getPendingInstructions(investor2.did)).results[0];
 
-    await restClient.settlements.affirmInstruction(instruction, {
-      options: { processMode: ProcessMode.Submit, signer: investor2Signer },
-    });
+    if (pendingInstructionId) {
+      await restClient.settlements.affirmInstruction(pendingInstructionId, {
+        options: { processMode: ProcessMode.Submit, signer: investor2Signer },
+      });
+    } else if (!isInstructionPurgedError(result)) {
+      throw new Error('Expected instruction id for blocked transfer test');
+    }
 
     const postHolders = await restClient.assets.getAssetHolders(assetId);
 
@@ -291,18 +337,7 @@ describe('AssetTransferRestrictions', () => {
   });
 
   it('should allow transfers once restrictions are removed', async () => {
-    const instructionParams = buildInstructionParams(investor2);
-    const instructionResult = await restClient.settlements.createDirectInstruction(
-      instructionParams
-    );
-
-    const { instruction } = instructionResult as RestSuccessResult & { instruction: string };
-
-    const affirmResult = await restClient.settlements.affirmInstruction(instruction, {
-      options: { processMode: ProcessMode.Submit, signer: investor2Signer },
-    });
-
-    await awaitMiddlewareSyncedForRestApi(affirmResult, restClient, new BigNumber(1));
+    await transferTo(investor2, investor2Signer);
 
     const { results } = await restClient.assets.getAssetHolders(assetId);
 

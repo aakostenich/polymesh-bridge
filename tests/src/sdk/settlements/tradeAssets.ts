@@ -4,7 +4,7 @@ import { VenueType } from '@polymeshassociation/polymesh-sdk/types';
 import assert from 'node:assert';
 
 import { addIsNotBlocked } from '~/sdk/settlements/util';
-import { awaitMiddlewareSynced } from '~/util';
+import { awaitMiddlewareSynced, getPendingInstructionEndBlock } from '~/util';
 
 interface Leg {
   asset: FungibleAsset;
@@ -67,8 +67,8 @@ export const tradeAssets = async (
     'The created venue should be returned'
   );
 
-  // Find the portfolio to trade with
   const destinationPortfolio = await counterParty.portfolios.getPortfolio();
+  const endBlock = await getPendingInstructionEndBlock(sdk);
 
   const addInstructionTx = await venue.addInstruction({
     legs: [
@@ -85,7 +85,7 @@ export const tradeAssets = async (
         asset: ask.asset,
       },
     ],
-    endBlock: undefined, // if specified the execution of the settlement will be delayed until this block
+    endBlock,
     tradeDate: undefined, // (optional) - specify a date if there are off chain components in the transaction
     memo: 'Some message', // optional - passing a message with the instruction
   });

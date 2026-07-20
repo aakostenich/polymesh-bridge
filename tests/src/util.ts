@@ -251,3 +251,25 @@ export const withPendingInstructionBlock = async <T extends Record<string, unkno
     endAfterBlock: (Number(latestBlock.id) + blocksAhead).toString(),
   };
 };
+
+/**
+ * On v8, instructions without an end block can auto-settle immediately.
+ * SDK settlement helpers should pass this as `endBlock` / `endAfterBlock`.
+ */
+export const getPendingInstructionEndBlock = async (
+  polymeshSdk: Polymesh,
+  restClient?: RestClient,
+  blocksAhead = 50
+): Promise<BigNumber | undefined> => {
+  if (isChainV7(polymeshSdk)) {
+    return undefined;
+  }
+
+  if (restClient) {
+    const latestBlock = await restClient.network.getLatestBlock();
+    return new BigNumber(Number(latestBlock.id) + blocksAhead);
+  }
+
+  const blockNumber = await polymeshSdk.network.getLatestBlock();
+  return blockNumber.plus(blocksAhead);
+};
