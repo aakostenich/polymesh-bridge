@@ -7,7 +7,7 @@ export VAULT_ADDR=http://vault:8200
 
 ###############################################################
 
-: "${TIMEOUT_SECONDS:=60}" # env var with default fallback
+: "${TIMEOUT_SECONDS:=120}" # env var with default fallback
 
 ###############################################################
 
@@ -17,9 +17,10 @@ set_status() {
 }
 
 wait_for_postgres() {
+    local last_error=""
     SECONDS_DELTA=$SECONDS
     while [[ $(($SECONDS - $SECONDS_DELTA)) -lt "$TIMEOUT_SECONDS" ]]; do
-        if psql -c "SELECT 1" > /dev/null 2>&1; then
+        if last_error=$(psql -c "SELECT 1" 2>&1 > /dev/null); then
             echo "Postgres is ready"
             return 0
         fi
@@ -27,6 +28,7 @@ wait_for_postgres() {
     done
 
     >&2 echo "Timed out waiting for Postgres to become ready"
+    >&2 echo "Last psql error: $last_error"
     return 1
 }
 
