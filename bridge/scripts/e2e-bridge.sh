@@ -23,9 +23,15 @@ RELAYER_DIR="${SCRIPT_DIR}/../relayer"
 ENV_FILE="${RELAYER_DIR}/.env"
 RPC_URL="${BRIDGE_ETH_RPC_URL:-http://127.0.0.1:8546}"
 INTENT_API="${BRIDGE_INTENT_API_URL:-http://127.0.0.1:3006}"
+API_TOKEN="${BRIDGE_API_TOKEN:-dev-bridge-token}"
 DO_RESTART=0
 RELAYER_PID=""
 RELAYER_LOG="${RELAYER_DIR}/.e2e-relayer.log"
+
+auth_hdr=()
+if [[ -n "$API_TOKEN" && "$API_TOKEN" != "off" && "$API_TOKEN" != "none" ]]; then
+  auth_hdr=(-H "Authorization: Bearer ${API_TOKEN}")
+fi
 
 for arg in "$@"; do
   case "$arg" in
@@ -95,7 +101,7 @@ wait_status() {
   echo "[E2E] waiting for intent=$intent_id status=$want (timeout ${timeout_s}s)"
   while true; do
     local body status
-    body="$(curl -sf "$INTENT_API/transfers/$intent_id" 2>/dev/null || true)"
+    body="$(curl -sf "${auth_hdr[@]}" "$INTENT_API/transfers/$intent_id" 2>/dev/null || true)"
     if [[ -n "$body" ]]; then
       status="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["transfer"]["status"])' <<<"$body" 2>/dev/null || true)"
       echo "[E2E]   status=$status"
@@ -145,7 +151,7 @@ echo "[E2E] === Poly → Eth (intent memo) ==="
 INTENT_ID="$(grep -Eo 'intentId=[0-9a-fA-F]+' /tmp/e2e-lock.out | head -1 | cut -d= -f2 || true)"
 if [[ -z "$INTENT_ID" ]]; then
   # Fallback: parse latest transfer
-  INTENT_ID="$(curl -sf "$INTENT_API/transfers?limit=1" | python3 -c 'import json,sys; print(json.load(sys.stdin)["transfers"][0]["intentId"])')"
+  INTENT_ID="$(curl -sf "${auth_hdr[@]}" "$INTENT_API/transfers?limit=1" | python3 -c 'import json,sys; print(json.load(sys.stdin)["transfers"][0]["intentId"])')"
 fi
 echo "[E2E] intentId=$INTENT_ID"
 
@@ -205,7 +211,7 @@ echo "[E2E] bridgeToPolymesh sent"
 ETH_INTENT=""
 for i in $(seq 1 60); do
   ETH_INTENT="$(
-    curl -sf "$INTENT_API/transfers?limit=20" | python3 -c '
+    curl -sf "${auth_hdr[@]}" "$INTENT_API/transfers?limit=20" | python3 -c '
 import json, sys
 data = json.load(sys.stdin)
 for t in data.get("transfers", []):

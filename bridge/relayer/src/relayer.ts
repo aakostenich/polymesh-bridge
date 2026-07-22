@@ -1,6 +1,8 @@
 import { BigNumber } from '@polymeshassociation/polymesh-sdk';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
+import { authorize, clientKey, RateLimiter } from './auth.js';
+import { capsSnapshot, checkTransferCaps } from './caps.js';
 import { config } from './config.js';
 import {
   closeDb,
@@ -66,10 +68,12 @@ function json(res: ServerResponse, status: number, payload: unknown): void {
     'content-type': 'application/json',
     'access-control-allow-origin': '*',
     'access-control-allow-methods': 'GET,POST,OPTIONS',
-    'access-control-allow-headers': 'content-type',
+    'access-control-allow-headers': 'content-type, authorization',
   });
   res.end(JSON.stringify(payload));
 }
+
+const lockIntentLimiter = new RateLimiter(config.rateLimit.windowMs, config.rateLimit.maxRequests);
 
 async function processEthToPolymesh(): Promise<void> {
   const latest = await getLatestBlock();
@@ -90,13 +94,33 @@ async function processEthToPolymesh(): Promise<void> {
       continue;
     }
 
+    const amountStr = ev.amount.toString();
+    const cap = checkTransferCaps(amountStr);
+    if (!cap.ok) {
+      log('ETH→POLY', `event id=${eventId} blocked by caps: ${cap.error}`);
+      if (!getTransfer(intentId)) {
+        createEthToPolyTransfer({
+          intentId,
+          ethSender: ev.sender,
+          polymeshRecipient: ev.polymeshRecipient,
+          amount: amountStr,
+          ethTxHash: ev.txHash,
+          status: 'failed',
+        });
+      }
+      updateTransfer(intentId, { status: 'failed', error: cap.error, ethTxHash: ev.txHash });
+      // Mark processed so we don't loop forever on over-cap burns.
+      markProcessed({ direction: 'eth_to_poly', eventId, txHash: ev.txHash });
+      continue;
+    }
+
     // Track transfer status (create if first time we see this burn).
     if (!getTransfer(intentId)) {
       createEthToPolyTransfer({
         intentId,
         ethSender: ev.sender,
         polymeshRecipient: ev.polymeshRecipient,
-        amount: ev.amount.toString(),
+        amount: amountStr,
         ethTxHash: ev.txHash,
         status: 'awaiting_finality',
       });
@@ -104,7 +128,7 @@ async function processEthToPolymesh(): Promise<void> {
       updateTransfer(intentId, { status: 'awaiting_finality', ethTxHash: ev.txHash });
     }
 
-    const amount = new BigNumber(ev.amount.toString());
+    const amount = new BigNumber(amountStr);
     log('ETH→POLY', `event id=${eventId}: releasing ${ev.amount} to ${ev.polymeshRecipient}`);
     updateTransfer(intentId, { status: 'relaying' });
 
@@ -300,17 +324,36 @@ function startApi(): void {
         const url = new URL(req.url ?? '/', `http://127.0.0.1:${config.intentApiPort}`);
 
         if (req.method === 'GET' && url.pathname === '/health') {
-          json(res, 200, { ok: true });
+          json(res, 200, {
+            ok: true,
+            authRequired: Boolean(config.apiToken),
+            caps: capsSnapshot(),
+          });
+          return;
+        }
+
+        if (req.method === 'GET' && url.pathname === '/caps') {
+          json(res, 200, { caps: capsSnapshot() });
           return;
         }
 
         if (req.method === 'GET' && url.pathname === '/transfers') {
+          const authErr = authorize(req);
+          if (authErr) {
+            json(res, 401, { error: authErr });
+            return;
+          }
           const limit = Number(url.searchParams.get('limit') ?? '50');
           json(res, 200, { transfers: listTransfers(Number.isFinite(limit) ? limit : 50) });
           return;
         }
 
         if (req.method === 'GET' && url.pathname.startsWith('/transfers/')) {
+          const authErr = authorize(req);
+          if (authErr) {
+            json(res, 401, { error: authErr });
+            return;
+          }
           const intentId = url.pathname.slice('/transfers/'.length);
           const t = getTransfer(intentId);
           if (!t) {
@@ -322,6 +365,16 @@ function startApi(): void {
         }
 
         if (req.method === 'POST' && url.pathname === '/lock-intent') {
+          const authErr = authorize(req);
+          if (authErr) {
+            json(res, 401, { error: authErr });
+            return;
+          }
+          if (!lockIntentLimiter.allow(clientKey(req))) {
+            json(res, 429, { error: 'rate limit exceeded; try again later' });
+            return;
+          }
+
           const body = await readBody(req);
           const parsed = JSON.parse(body) as {
             polySender?: string;
@@ -334,6 +387,12 @@ function startApi(): void {
           }
           if (!parsed.ethRecipient.startsWith('0x') || parsed.ethRecipient.length !== 42) {
             json(res, 400, { error: 'invalid ethRecipient' });
+            return;
+          }
+
+          const cap = checkTransferCaps(parsed.amount);
+          if (!cap.ok) {
+            json(res, 400, { error: cap.error, caps: capsSnapshot() });
             return;
           }
 
@@ -367,13 +426,23 @@ function startApi(): void {
   server.listen(config.intentApiPort, () => {
     log(
       'RELAYER',
-      `API on :${config.intentApiPort}  POST /lock-intent  GET /transfers  GET /health`,
+      `API on :${config.intentApiPort}  auth=${config.apiToken ? 'on' : 'OFF'}  POST /lock-intent  GET /transfers  GET /caps`,
     );
   });
 }
 
 async function main(): Promise<void> {
   log('RELAYER', 'starting');
+  if (!config.apiToken) {
+    log('RELAYER', 'WARNING: BRIDGE_API_TOKEN disabled — intent API is open. Local use only.');
+  } else {
+    log('RELAYER', 'API auth enabled (Bearer token required for /lock-intent and /transfers)');
+  }
+  log(
+    'RELAYER',
+    `caps min=${config.caps.minAmount} max=${config.caps.maxAmount} daily=${config.caps.dailyVolume} (base units)`,
+  );
+
   const escrow = await getEscrowAddress();
   const balance = await getEscrowBalance();
   log(

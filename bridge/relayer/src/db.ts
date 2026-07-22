@@ -294,9 +294,33 @@ export function intentIdToPolyEventId(intentId: string): bigint {
   return BigInt(`0x${hex}`);
 }
 
+/**
+ * Sum transfer amounts since unix timestamp (inclusive) that count toward
+ * daily volume: completed + in-flight (not failed).
+ */
+export function sumVolumeSince(sinceUnix: number): bigint {
+  const rows = getDb()
+    .prepare(
+      `SELECT amount FROM transfers
+       WHERE created_at >= ?
+         AND status IN ('intent_registered','locked','awaiting_finality','relaying','completed')`,
+    )
+    .all(sinceUnix) as Array<{ amount: string }>;
+  let total = 0n;
+  for (const r of rows) {
+    try {
+      total += BigInt(r.amount);
+    } catch {
+      // skip malformed
+    }
+  }
+  return total;
+}
+
 export function closeDb(): void {
   if (_db) {
     _db.close();
     _db = undefined;
   }
 }
+

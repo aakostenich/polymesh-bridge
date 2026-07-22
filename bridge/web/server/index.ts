@@ -35,18 +35,36 @@ function ethProvider(): JsonRpcProvider {
   return new JsonRpcProvider(config.eth.rpcUrl, config.eth.chainId, { staticNetwork: true });
 }
 
-async function probeRelayer(): Promise<{ ok: boolean; detail: string }> {
+async function probeRelayer(): Promise<{
+  ok: boolean;
+  detail: string;
+  authRequired?: boolean;
+  caps?: unknown;
+}> {
   try {
     const res = await fetch(`${config.intentApiUrl}/health`, { method: 'GET' });
     if (!res.ok) return { ok: false, detail: `HTTP ${res.status}` };
-    return { ok: true, detail: 'healthy' };
+    const body = (await res.json()) as { authRequired?: boolean; caps?: unknown };
+    return {
+      ok: true,
+      detail: 'healthy',
+      authRequired: body.authRequired,
+      caps: body.caps,
+    };
   } catch (err) {
     return { ok: false, detail: (err as Error).message };
   }
 }
 
+function relayerHeaders(json = false): Record<string, string> {
+  const h: Record<string, string> = {};
+  if (json) h['content-type'] = 'application/json';
+  if (config.apiToken) h.authorization = `Bearer ${config.apiToken}`;
+  return h;
+}
+
 async function proxyRelayer(path: string): Promise<{ status: number; body: unknown }> {
-  const res = await fetch(`${config.intentApiUrl}${path}`);
+  const res = await fetch(`${config.intentApiUrl}${path}`, { headers: relayerHeaders() });
   const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
   return { status: res.status, body };
 }
@@ -130,10 +148,21 @@ app.get('/api/status', async (_req, res) => {
         ok: relayer.ok,
         url: config.intentApiUrl,
         detail: relayer.detail,
+        authRequired: relayer.authRequired ?? Boolean(config.apiToken),
       },
+      caps: relayer.caps ?? null,
     });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get('/api/caps', async (_req, res) => {
+  try {
+    const { status, body } = await proxyRelayer('/caps');
+    res.status(status).json(body);
+  } catch (err) {
+    res.status(502).json({ error: `relayer unreachable: ${(err as Error).message}` });
   }
 });
 

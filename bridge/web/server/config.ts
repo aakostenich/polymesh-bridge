@@ -40,6 +40,17 @@ export const config = {
     escrowMnemonic: required('BRIDGE_POLYMESH_ESCROW_MNEMONIC', '//Charlie'),
   },
   intentApiUrl: process.env.BRIDGE_INTENT_API_URL ?? 'http://127.0.0.1:3006',
+  /**
+   * Relayer API token. Mirrors relayer default (`dev-bridge-token`).
+   * Set BRIDGE_API_TOKEN=off to disable.
+   */
+  apiToken: (() => {
+    const raw = process.env.BRIDGE_API_TOKEN;
+    if (raw === undefined) return 'dev-bridge-token';
+    const t = raw.trim();
+    if (t === '' || t.toLowerCase() === 'off' || t.toLowerCase() === 'none') return null;
+    return t;
+  })(),
 } as const;
 
 /** Well-known Anvil accounts (Foundry defaults) for local demos. */

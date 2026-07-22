@@ -127,9 +127,11 @@ export async function lockPolyx(params: {
     const escrow = await getEscrowAddress();
 
     const intentUrl = `${config.intentApiUrl}/lock-intent`;
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (config.apiToken) headers.authorization = `Bearer ${config.apiToken}`;
     const intentResp = await fetch(intentUrl, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers,
       body: JSON.stringify({
         polySender: sender,
         ethRecipient,

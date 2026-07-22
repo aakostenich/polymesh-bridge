@@ -178,6 +178,11 @@ All knobs are env vars (see `bridge/relayer/.env.example`):
 | `BRIDGE_POLYMESH_FINALITY_BLOCKS` | `5` | Polymesh blocks before mint |
 | `BRIDGE_POLL_INTERVAL_MS` | `4000` | Main poll cadence |
 | `BRIDGE_INTENT_API_PORT` | `3006` | Relayer HTTP API |
+| `BRIDGE_API_TOKEN` | `dev-bridge-token` | Bearer token (`off` disables auth) |
+| `BRIDGE_API_RATE_MAX` | `30` | Max `POST /lock-intent` per IP per window |
+| `BRIDGE_MIN_AMOUNT_POLYX` | `0.01` | Min transfer size |
+| `BRIDGE_MAX_AMOUNT_POLYX` | `10000` | Max per-tx size |
+| `BRIDGE_DAILY_VOLUME_POLYX` | `100000` | UTC-day volume cap |
 
 ---
 
@@ -198,10 +203,10 @@ All knobs are env vars (see `bridge/relayer/.env.example`):
    wPOLYX, censor withdrawals, or drain escrow.
 2. **Correct local chain config.** RPC endpoints and contract addresses are
    not MITM'd (local demo; production needs authenticated endpoints + pin).
-3. **Intent API authenticity.** `POST /lock-intent` is unauthenticated local
-   HTTP. Anyone who can reach it can register intents; mint still requires a
-   matching on-chain lock with the memo. Do not expose `:3006` publicly without
-   auth.
+3. **Intent API authenticity.** `POST /lock-intent` and `GET /transfers` require
+   `Authorization: Bearer <BRIDGE_API_TOKEN>` (default `dev-bridge-token`). Rate
+   limited per IP. Set token to a strong secret outside local demo; use `off`
+   only on loopback.
 4. **Finality heuristics.** Polymesh uses `latest - N` blocks; Ethereum uses
    `latest - confirmations`. Not full GRANDPA/PoS finality proofs.
 5. **Dev keys.** Anvil / `//Alice` style keys are public. Never use with value.
@@ -222,15 +227,15 @@ All knobs are env vars (see `bridge/relayer/.env.example`):
 |---|---|
 | Malicious / compromised relayer | Can mint freely to any address; can steal escrow POLYX |
 | Censorship | Relayer can ignore burns/locks |
-| Intent DoS | Unauthenticated intent registration can fill SQLite |
+| Intent DoS | Mitigated by Bearer auth + rate limit; still keep port private |
 | Chain reorg beyond heuristic | Possible incorrect skip/retry on shallow finality |
 | Smart-contract bugs | Contracts are unaudited research code |
 
 ### Hardening roadmap
 
 - M-of-N relayer / threshold mint
-- Authenticated intent API + rate limits
-- Per-tx and daily volume caps (pause already wired)
+- Strong production secrets (rotate default `dev-bridge-token`)
+- On-chain caps / multi-relayer (off-chain min/max/daily already wired)
 - Real GRANDPA / beacon finality checks
 - External audit before any real-asset use
 

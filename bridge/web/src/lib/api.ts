@@ -23,7 +23,18 @@ export type StatusResponse = {
     ok: boolean;
     url: string;
     detail: string;
+    authRequired?: boolean;
   };
+  caps?: {
+    minAmount: string;
+    maxAmount: string;
+    dailyVolume: string;
+    dailyUsed: string;
+    minPolyx: string;
+    maxPolyx: string;
+    dailyVolumePolyx: string;
+    dailyUsedPolyx: string;
+  } | null;
 };
 
 export type PolyAccount = {

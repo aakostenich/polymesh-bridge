@@ -55,10 +55,15 @@ async function main(): Promise<void> {
 
   const intentApiBase = process.env.BRIDGE_INTENT_API_URL ?? 'http://127.0.0.1:3006';
   const intentApiUrl = `${intentApiBase}/lock-intent`;
+  const apiToken = process.env.BRIDGE_API_TOKEN ?? 'dev-bridge-token';
   console.log(`[LOCK] registering intent with relayer at ${intentApiUrl}...`);
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (apiToken && apiToken.toLowerCase() !== 'off' && apiToken.toLowerCase() !== 'none') {
+    headers.authorization = `Bearer ${apiToken}`;
+  }
   const intentResp = await fetch(intentApiUrl, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers,
     body: JSON.stringify({
       polySender: sender,
       ethRecipient,

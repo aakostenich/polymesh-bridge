@@ -11,10 +11,15 @@ import {
 } from './lib/api';
 import {
   bridgeToPolymesh,
+  connectMetaMask,
   formatPolyx,
+  getWpolyxBalance,
+  hasMetaMask,
   shortAddr,
   signerFromPrivateKey,
 } from './lib/eth';
+
+type EthWalletMode = 'demo' | 'metamask';
 
 type Tab = 'home' | 'bridge' | 'portfolio' | 'activity' | 'network' | 'docs';
 type Direction = 'poly_to_eth' | 'eth_to_poly';
@@ -171,6 +176,9 @@ export function App() {
   const [amount, setAmount] = useState('10');
   const [polySender, setPolySender] = useState('//Bob');
   const [ethAccountIdx, setEthAccountIdx] = useState(2);
+  const [ethWalletMode, setEthWalletMode] = useState<EthWalletMode>('demo');
+  const [mmAddress, setMmAddress] = useState<string | null>(null);
+  const [mmWpolyx, setMmWpolyx] = useState<string>('0');
   const [busy, setBusy] = useState(false);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -225,27 +233,96 @@ export function App() {
       }
     : null;
 
+  const ethRecipientAddress =
+    ethWalletMode === 'metamask' && mmAddress ? mmAddress : selectedEth?.address;
+
+  const ethDisplayName =
+    ethWalletMode === 'metamask' && mmAddress
+      ? `MetaMask ${shortAddr(mmAddress)}`
+      : (selectedEth?.name?.replace('Anvil ', 'Account ') ?? '…');
+
+  const ethWpolyxDisplay =
+    ethWalletMode === 'metamask' && mmAddress
+      ? formatPolyx(mmWpolyx)
+      : selectedEth
+        ? formatPolyx(selectedEth.wPolyxBalance)
+        : '—';
+
+  const refreshMmBalance = useCallback(async () => {
+    if (!mmAddress || !ethCfg) return;
+    try {
+      const bal = await getWpolyxBalance(mmAddress, ethCfg);
+      setMmWpolyx(bal.toString());
+    } catch {
+      /* ignore */
+    }
+  }, [mmAddress, ethCfg]);
+
+  useEffect(() => {
+    void refreshMmBalance();
+  }, [refreshMmBalance, transfers]);
+
+  async function onConnectMetaMask() {
+    if (!ethCfg) {
+      push('err', 'Bridge config not loaded yet');
+      return;
+    }
+    try {
+      const { address } = await connectMetaMask(ethCfg);
+      setMmAddress(address);
+      setEthWalletMode('metamask');
+      const bal = await getWpolyxBalance(address, ethCfg);
+      setMmWpolyx(bal.toString());
+      push('ok', `MetaMask connected: ${shortAddr(address)}`);
+    } catch (err) {
+      push('err', (err as Error).message);
+    }
+  }
+
+  function onDisconnectMetaMask() {
+    setMmAddress(null);
+    setMmWpolyx('0');
+    setEthWalletMode('demo');
+    push('info', 'Switched back to demo Anvil accounts');
+  }
+
   const canSubmit = useMemo(() => {
     if (busy || !status) return false;
     if (!amount || Number(amount) <= 0) return false;
     if (direction === 'poly_to_eth') {
-      return Boolean(selectedPoly && selectedEth && status.relayer.ok && status.polymesh.ok);
+      return Boolean(
+        selectedPoly && ethRecipientAddress && status.relayer.ok && status.polymesh.ok,
+      );
+    }
+    if (ethWalletMode === 'metamask') {
+      return Boolean(mmAddress && selectedPoly && status.eth.ok && ethCfg);
     }
     return Boolean(selectedEth && selectedPoly && status.eth.ok && ethCfg);
-  }, [busy, status, amount, direction, selectedPoly, selectedEth, ethCfg]);
+  }, [
+    busy,
+    status,
+    amount,
+    direction,
+    selectedPoly,
+    selectedEth,
+    ethCfg,
+    ethWalletMode,
+    mmAddress,
+    ethRecipientAddress,
+  ]);
 
   async function onBridge() {
-    if (!canSubmit || !selectedPoly || !selectedEth || !ethCfg) return;
+    if (!canSubmit || !selectedPoly || !ethCfg || !ethRecipientAddress) return;
     setBusy(true);
     try {
       if (direction === 'poly_to_eth') {
         push(
           'wait',
-          `Locking ${amount} POLYX from ${selectedPoly.name} → mint to ${shortAddr(selectedEth.address)}…`,
+          `Locking ${amount} POLYX from ${selectedPoly.name} → mint to ${shortAddr(ethRecipientAddress)}…`,
         );
         const result = await api.lock({
           senderMnemonic: selectedPoly.mnemonic,
-          ethRecipient: selectedEth.address,
+          ethRecipient: ethRecipientAddress,
           amount,
         });
         setTrackedIntentId(result.intentId);
@@ -256,15 +333,19 @@ export function App() {
       } else {
         push(
           'wait',
-          `Burning ${amount} wPOLYX from ${selectedEth.name} → release to ${selectedPoly.name}…`,
+          `Burning ${amount} wPOLYX from ${ethDisplayName} → release to ${selectedPoly.name}…`,
         );
-        const signer = signerFromPrivateKey(
-          selectedEth.privateKey,
-          ethCfg.rpcUrl,
-          ethCfg.chainId,
-        );
+        let signer;
+        if (ethWalletMode === 'metamask') {
+          const connected = await connectMetaMask(ethCfg);
+          signer = connected.signer;
+        } else {
+          if (!selectedEth) throw new Error('No demo account selected');
+          signer = signerFromPrivateKey(selectedEth.privateKey, ethCfg.rpcUrl, ethCfg.chainId);
+        }
         const hash = await bridgeToPolymesh(signer, ethCfg, selectedPoly.address, amount);
         push('ok', `Burned. Tx ${shortAddr(hash, 6)}. Relayer will release POLYX.`);
+        await refreshMmBalance();
       }
       await refresh();
     } catch (err) {
@@ -307,6 +388,15 @@ export function App() {
         </nav>
 
         <div className="topnav-right">
+          {hasMetaMask() && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => void (mmAddress ? onDisconnectMetaMask() : onConnectMetaMask())}
+            >
+              {mmAddress ? shortAddr(mmAddress) : 'Connect MetaMask'}
+            </button>
+          )}
           <button
             type="button"
             className="icon-btn"
@@ -368,12 +458,21 @@ export function App() {
               setPolySender={setPolySender}
               ethAccountIdx={ethAccountIdx}
               setEthAccountIdx={setEthAccountIdx}
+              ethWalletMode={ethWalletMode}
+              setEthWalletMode={setEthWalletMode}
+              mmAddress={mmAddress}
+              mmWpolyx={mmWpolyx}
+              ethDisplayName={ethDisplayName}
+              ethWpolyxDisplay={ethWpolyxDisplay}
+              ethRecipientAddress={ethRecipientAddress}
               selectedPoly={selectedPoly}
               selectedEth={selectedEth}
               busy={busy}
               canSubmit={canSubmit}
               onBridge={() => void onBridge()}
               onRefresh={() => void refresh()}
+              onConnectMetaMask={() => void onConnectMetaMask()}
+              onDisconnectMetaMask={onDisconnectMetaMask}
             />
           )}
           {tab === 'portfolio' && (
@@ -553,12 +652,21 @@ function BridgePage(props: {
   setPolySender: (v: string) => void;
   ethAccountIdx: number;
   setEthAccountIdx: (n: number) => void;
+  ethWalletMode: EthWalletMode;
+  setEthWalletMode: (m: EthWalletMode) => void;
+  mmAddress: string | null;
+  mmWpolyx: string;
+  ethDisplayName: string;
+  ethWpolyxDisplay: string;
+  ethRecipientAddress?: string;
   selectedPoly?: PolyAccount;
   selectedEth?: EthAccount;
   busy: boolean;
   canSubmit: boolean;
   onBridge: () => void;
   onRefresh: () => void;
+  onConnectMetaMask: () => void;
+  onDisconnectMetaMask: () => void;
 }) {
   const {
     status,
@@ -576,12 +684,20 @@ function BridgePage(props: {
     setPolySender,
     ethAccountIdx,
     setEthAccountIdx,
+    ethWalletMode,
+    setEthWalletMode,
+    mmAddress,
+    ethDisplayName,
+    ethWpolyxDisplay,
+    ethRecipientAddress,
     selectedPoly,
     selectedEth,
     busy,
     canSubmit,
     onBridge,
     onRefresh,
+    onConnectMetaMask,
+    onDisconnectMetaMask,
   } = props;
 
   const tracked = trackedIntentId
@@ -607,14 +723,12 @@ function BridgePage(props: {
       ? selectedPoly
         ? `${formatPolyx(selectedPoly.balance)} POLYX available`
         : '—'
-      : selectedEth
-        ? `${formatPolyx(selectedEth.wPolyxBalance)} wPOLYX available`
-        : '—';
+      : `${ethWpolyxDisplay} wPOLYX available`;
 
   const toBalance =
     direction === 'poly_to_eth'
-      ? selectedEth
-        ? `${formatPolyx(selectedEth.wPolyxBalance)} wPOLYX · ${shortAddr(selectedEth.address, 4)}`
+      ? ethRecipientAddress
+        ? `${ethWpolyxDisplay} wPOLYX · ${shortAddr(ethRecipientAddress, 4)}`
         : '—'
       : selectedPoly
         ? `${formatPolyx(selectedPoly.balance)} POLYX · ${shortAddr(selectedPoly.address, 4)}`
@@ -651,6 +765,62 @@ function BridgePage(props: {
               </button>
             </div>
 
+            <div className="segmented" role="tablist" aria-label="Eth wallet" style={{ marginBottom: 14 }}>
+              <button
+                type="button"
+                className={ethWalletMode === 'demo' ? 'active' : ''}
+                onClick={() => {
+                  setEthWalletMode('demo');
+                  onDisconnectMetaMask();
+                }}
+              >
+                Demo accounts
+              </button>
+              <button
+                type="button"
+                className={ethWalletMode === 'metamask' ? 'active' : ''}
+                onClick={() => {
+                  if (!mmAddress) onConnectMetaMask();
+                  else setEthWalletMode('metamask');
+                }}
+              >
+                MetaMask
+              </button>
+            </div>
+
+            {ethWalletMode === 'metamask' && (
+              <div className="summary-card" style={{ marginTop: 0, marginBottom: 14 }}>
+                {mmAddress ? (
+                  <>
+                    Connected <strong className="mono">{shortAddr(mmAddress, 6)}</strong> ·{' '}
+                    {ethWpolyxDisplay} wPOLYX
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ marginLeft: 8 }}
+                      onClick={onDisconnectMetaMask}
+                    >
+                      Disconnect
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    MetaMask not connected.{' '}
+                    <button type="button" className="btn btn-ghost" onClick={onConnectMetaMask}>
+                      Connect
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {status?.caps && (
+              <div className="balance-line" style={{ marginBottom: 12 }}>
+                Caps: min {status.caps.minPolyx} · max {status.caps.maxPolyx} · daily used{' '}
+                {status.caps.dailyUsedPolyx}/{status.caps.dailyVolumePolyx} POLYX
+              </div>
+            )}
+
             <div className="field">
               <div className="field-label">
                 <span>From</span>
@@ -664,21 +834,34 @@ function BridgePage(props: {
                     </span>
                     {direction === 'poly_to_eth' ? 'Polymesh' : 'Ethereum'}
                   </div>
-                  <div className="select-wrap">
-                    <select
-                      value={direction === 'poly_to_eth' ? polySender : String(ethAccountIdx)}
-                      onChange={(e) => {
-                        if (direction === 'poly_to_eth') setPolySender(e.target.value);
-                        else setEthAccountIdx(Number(e.target.value));
-                      }}
-                    >
-                      {(direction === 'poly_to_eth' ? polyOptions : ethOptions).map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.title} · {o.subtitle}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {direction === 'poly_to_eth' ? (
+                    <div className="select-wrap">
+                      <select value={polySender} onChange={(e) => setPolySender(e.target.value)}>
+                        {polyOptions.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.title} · {o.subtitle}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : ethWalletMode === 'metamask' ? (
+                    <div className="chain-pill" style={{ opacity: 0.9 }}>
+                      {ethDisplayName}
+                    </div>
+                  ) : (
+                    <div className="select-wrap">
+                      <select
+                        value={String(ethAccountIdx)}
+                        onChange={(e) => setEthAccountIdx(Number(e.target.value))}
+                      >
+                        {ethOptions.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.title} · {o.subtitle}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
                 <div className="amount-input-row">
                   <input
@@ -723,21 +906,36 @@ function BridgePage(props: {
                     </span>
                     {direction === 'poly_to_eth' ? 'Ethereum' : 'Polymesh'}
                   </div>
-                  <div className="select-wrap">
-                    <select
-                      value={direction === 'poly_to_eth' ? String(ethAccountIdx) : polySender}
-                      onChange={(e) => {
-                        if (direction === 'poly_to_eth') setEthAccountIdx(Number(e.target.value));
-                        else setPolySender(e.target.value);
-                      }}
-                    >
-                      {(direction === 'poly_to_eth' ? ethOptions : polyOptions).map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.title} · {o.subtitle}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {direction === 'poly_to_eth' ? (
+                    ethWalletMode === 'metamask' ? (
+                      <div className="chain-pill" style={{ opacity: 0.9 }}>
+                        {ethDisplayName}
+                      </div>
+                    ) : (
+                      <div className="select-wrap">
+                        <select
+                          value={String(ethAccountIdx)}
+                          onChange={(e) => setEthAccountIdx(Number(e.target.value))}
+                        >
+                          {ethOptions.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.title} · {o.subtitle}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )
+                  ) : (
+                    <div className="select-wrap">
+                      <select value={polySender} onChange={(e) => setPolySender(e.target.value)}>
+                        {polyOptions.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.title} · {o.subtitle}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
                 <div className="balance-line">{toBalance}</div>
               </div>
@@ -756,13 +954,12 @@ function BridgePage(props: {
                 <>
                   Lock <strong>{amount || '—'}</strong> POLYX from{' '}
                   <strong>{selectedPoly?.name ?? '…'}</strong>. Relayer mints wPOLYX to{' '}
-                  <strong>{selectedEth?.name?.replace('Anvil ', 'Account ') ?? '…'}</strong>.
+                  <strong>{ethDisplayName}</strong>.
                 </>
               ) : (
                 <>
-                  Burn <strong>{amount || '—'}</strong> wPOLYX from{' '}
-                  <strong>{selectedEth?.name?.replace('Anvil ', 'Account ') ?? '…'}</strong>.
-                  Relayer releases POLYX to <strong>{selectedPoly?.name ?? '…'}</strong>.
+                  Burn <strong>{amount || '—'}</strong> wPOLYX from <strong>{ethDisplayName}</strong>
+                  . Relayer releases POLYX to <strong>{selectedPoly?.name ?? '…'}</strong>.
                 </>
               )}
             </div>
@@ -1181,11 +1378,21 @@ function DocsPage(props: { onLaunch: () => void }) {
             </p>
           </div>
           <div className="docs-block">
+            <h4>Auth, caps, wallets</h4>
+            <ul>
+              <li>
+                Relayer API: <code>Authorization: Bearer &lt;BRIDGE_API_TOKEN&gt;</code> + rate limits
+              </li>
+              <li>Caps: min / max per tx + daily volume (UTC)</li>
+              <li>Ethereum: Demo Anvil keys or MetaMask (auto-adds local Anvil chain)</li>
+            </ul>
+          </div>
+          <div className="docs-block">
             <h4>Threat model (summary)</h4>
             <p>
               Single trusted relayer holds mint + escrow keys. Replay is guarded on-chain and in
-              SQLite. Intent API is local/unauthenticated — do not expose publicly. Full write-up
-              lives in <code>bridge/README.md</code>.
+              SQLite. Intent API uses Bearer auth — still keep port private. Full write-up lives in{' '}
+              <code>bridge/README.md</code>.
             </p>
           </div>
           <button type="button" className="btn btn-primary" onClick={props.onLaunch}>

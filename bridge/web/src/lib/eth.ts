@@ -1,4 +1,12 @@
-import { BrowserProvider, Contract, JsonRpcProvider, Wallet, parseUnits, type Signer } from 'ethers';
+import {
+  BrowserProvider,
+  Contract,
+  JsonRpcProvider,
+  Wallet,
+  parseUnits,
+  type Eip1193Provider,
+  type Signer,
+} from 'ethers';
 
 const WPOLYX_ABI = [
   'function balanceOf(address) view returns (uint256)',
@@ -38,26 +46,71 @@ export function shortAddr(addr: string, n = 4): string {
   return `${addr.slice(0, 2 + n)}…${addr.slice(-n)}`;
 }
 
+function getEthereum(): Eip1193Provider {
+  const eth = (window as unknown as { ethereum?: Eip1193Provider }).ethereum;
+  if (!eth) throw new Error('MetaMask not found. Install MetaMask or use Demo accounts.');
+  return eth;
+}
+
+export function hasMetaMask(): boolean {
+  return Boolean((window as unknown as { ethereum?: unknown }).ethereum);
+}
+
 /** Sign with a local Anvil private key (demo mode — no MetaMask required). */
 export function signerFromPrivateKey(privateKey: string, rpcUrl: string, chainId: number): Wallet {
   const provider = new JsonRpcProvider(rpcUrl, chainId, { staticNetwork: true });
   return new Wallet(privateKey, provider);
 }
 
-/** Optional MetaMask path. */
-export async function signerFromMetaMask(): Promise<{ signer: Signer; address: string }> {
-  const eth = (window as unknown as { ethereum?: unknown }).ethereum;
-  if (!eth) throw new Error('MetaMask not found');
-  const provider = new BrowserProvider(eth as never);
-  await provider.send('eth_requestAccounts', []);
-  const signer = await provider.getSigner();
-  return { signer, address: await signer.getAddress() };
+/**
+ * Ensure MetaMask is on the bridge's local Anvil chain (default 1337 / 0x539).
+ * Adds the network if missing.
+ */
+export async function ensureAnvilNetwork(cfg: EthConfig): Promise<void> {
+  const eth = getEthereum();
+  const chainIdHex = `0x${cfg.chainId.toString(16)}`;
+  try {
+    await eth.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: chainIdHex }],
+    });
+  } catch (err) {
+    const code = (err as { code?: number }).code;
+    // 4902 = chain not added
+    if (code === 4902 || code === -32603) {
+      await eth.request({
+        method: 'wallet_addEthereumChain',
+        params: [
+          {
+            chainId: chainIdHex,
+            chainName: 'Anvil Local (POLYX Bridge)',
+            nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+            rpcUrls: [cfg.rpcUrl],
+          },
+        ],
+      });
+      return;
+    }
+    throw err;
+  }
 }
 
-export async function getWpolyxBalance(
-  address: string,
+/** Connect MetaMask, switch to Anvil, return signer + address. */
+export async function connectMetaMask(
   cfg: EthConfig,
-): Promise<bigint> {
+): Promise<{ signer: Signer; address: string; provider: BrowserProvider }> {
+  const eth = getEthereum();
+  const provider = new BrowserProvider(eth);
+  await provider.send('eth_requestAccounts', []);
+  await ensureAnvilNetwork(cfg);
+  // Re-create after chain switch so network is correct.
+  const provider2 = new BrowserProvider(eth);
+  const signer = await provider2.getSigner();
+  const address = await signer.getAddress();
+  return { signer, address, provider: provider2 };
+}
+
+export async function getWpolyxBalance(address: string, cfg: EthConfig): Promise<bigint> {
   const provider = new JsonRpcProvider(cfg.rpcUrl, cfg.chainId, { staticNetwork: true });
   const token = new Contract(cfg.wPolyxAddress, WPOLYX_ABI, provider);
   return (await token.balanceOf(address)) as bigint;
