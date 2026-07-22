@@ -224,7 +224,7 @@ services:
       start_period: 30s
 
   polymesh-eth-rpc:
-    image: ${POLYMESH_ETH_RPC_IMAGE:-paritypr/eth-rpc:master-fba8b6f3}
+    image: ${POLYMESH_ETH_RPC_IMAGE:-paritypr/eth-rpc:stable2606-73b734d9}
     platform: ${POLYMESH_ETH_RPC_PLATFORM:-linux/amd64}
     profiles:
       - evm

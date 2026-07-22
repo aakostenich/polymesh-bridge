@@ -1,6 +1,6 @@
 COMPOSE_PROJECT_NAME=polymesh
 
-POLYMESH_CHAIN_IMAGE=polymeshassociation/polymesh:8.0.0-mainnet-debian
+POLYMESH_CHAIN_IMAGE=polymeshassociation/polymesh:8.0.2-testnet-debian
 POLYMESH_CHAIN_WS_PORT=9944
 POLYMESH_CHAIN_RPC_PORT=9933
 POLYMESH_CHAIN_P2P_PORT=30333
@@ -15,7 +15,7 @@ POLYMESH_SUBQUERY_GRAPHQL_IMAGE=onfinality/subql-query:v2.9.0
 POLYMESH_SUBQUERY_GRAPHQL_PORT=3000
 # Optional EVM tooling (v8+ only, used with --profile evm)
 # POLYMESH_EVM_CHAIN_ID=1641818
-# POLYMESH_ETH_RPC_IMAGE=paritypr/eth-rpc:master-fba8b6f3
+# POLYMESH_ETH_RPC_IMAGE=paritypr/eth-rpc:stable2606-73b734d9
 # POLYMESH_ETH_RPC_PLATFORM=linux/amd64
 # POLYMESH_ETH_RPC_NODE_RPC_URL=ws://polymesh-node:9944
 # POLYMESH_ETH_RPC_PORT=8545
