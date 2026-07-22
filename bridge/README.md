@@ -6,7 +6,8 @@ on Ethereum (local Anvil or **Sepolia testnet**).
 > ⚠️ **MVP / research prototype.** Single trusted relayer. Not audited. Do not
 > use for real assets. See [Trust model & limitations](#trust-model--limitations).
 >
-> **Public testnet:** see **[TESTNET.md](./TESTNET.md)** — faucets, Sepolia deploy, relayer env.
+> **Public testnet:** see **[TESTNET.md](./TESTNET.md)** — faucets, Sepolia deploy, relayer env.  
+> **MetaMask → Polymesh:** see **[METAMASK.md](./METAMASK.md)** — get wPOLYX and burn to POLYX.
 
 ---
 

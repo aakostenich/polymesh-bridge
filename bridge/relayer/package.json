@@ -12,6 +12,7 @@
     "start:testnet": "BRIDGE_NETWORK=testnet tsx src/relayer.ts",
     "bootstrap": "tsx src/ops/bootstrap-escrow.ts",
     "lock": "tsx src/ops/lock-polyx.ts",
+    "faucet:wpolyx": "tsx src/ops/fund-wpolyx.ts",
     "addresses": "tsx src/ops/print-addresses.ts",
     "addresses:testnet": "BRIDGE_NETWORK=testnet tsx src/ops/print-addresses.ts",
     "check": "tsx src/ops/check-ready.ts",

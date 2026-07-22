@@ -128,6 +128,27 @@ export async function getWpolyxBalance(address: string, cfg: EthConfig): Promise
   return (await token.balanceOf(address)) as bigint;
 }
 
+/** Prompt MetaMask to track wPOLYX (ERC-20, 6 decimals). */
+export async function watchWpolyxToken(cfg: EthConfig): Promise<boolean> {
+  const eth = getEthereum();
+  try {
+    const ok = await eth.request({
+      method: 'wallet_watchAsset',
+      params: {
+        type: 'ERC20',
+        options: {
+          address: cfg.wPolyxAddress,
+          symbol: 'wPOLYX',
+          decimals: 6,
+        },
+      },
+    });
+    return Boolean(ok);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Ethereum → Polymesh: approve (if needed) then bridgeToPolymesh.
  */

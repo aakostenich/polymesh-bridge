@@ -161,4 +161,21 @@ export const api = {
     })),
   transfer: (intentId: string) =>
     json<{ transfer: TransferRecord; memo?: string }>(`/api/transfers/${intentId}`),
+  /** Local-only: lock //Bob POLYX → mint wPOLYX to ethRecipient. */
+  faucetWpolyx: (body: { ethRecipient: string; amount?: string }) =>
+    json<{
+      ok: true;
+      intentId: string;
+      memo: string;
+      amountBase: string;
+      wPolyxAddress: string;
+      chainId: number;
+      rpcUrl: string;
+      chainName: string;
+      note: string;
+    }>('/api/faucet/wpolyx', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
 };

@@ -356,6 +356,47 @@ app.post('/api/lock', async (req, res) => {
   }
 });
 
+/**
+ * Local demo faucet: mint wPOLYX to an Eth address by locking //Bob's POLYX.
+ * Disabled on testnet (use real funded mnemonic via yarn faucet:wpolyx).
+ */
+app.post('/api/faucet/wpolyx', async (req, res) => {
+  try {
+    if (config.network === 'testnet') {
+      res.status(403).json({
+        error:
+          'HTTP faucet disabled on testnet. Use: cd bridge/relayer && yarn faucet:wpolyx <addr> <amount> "<mnemonic>"',
+      });
+      return;
+    }
+    const { ethRecipient, amount } = req.body as {
+      ethRecipient?: string;
+      amount?: string;
+    };
+    if (!ethRecipient) {
+      res.status(400).json({ error: 'ethRecipient required' });
+      return;
+    }
+    const amountHuman = amount && Number(amount) > 0 ? amount : '10';
+    const result = await lockPolyx({
+      senderMnemonic: '//Bob',
+      ethRecipient,
+      amountHuman,
+    });
+    res.status(201).json({
+      ok: true,
+      ...result,
+      note: 'Wait for relayer to mint (status → completed). Then import wPOLYX token in MetaMask.',
+      wPolyxAddress: config.eth.wPolyxAddress,
+      chainId: config.eth.chainId,
+      rpcUrl: config.eth.rpcUrl,
+      chainName: config.eth.chainName,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 /** Proxy transfer status machine from the relayer (SQLite-backed). */
 app.get('/api/transfers', async (req, res) => {
   try {

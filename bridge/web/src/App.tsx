@@ -17,6 +17,7 @@ import {
   hasMetaMask,
   shortAddr,
   signerFromPrivateKey,
+  watchWpolyxToken,
 } from './lib/eth';
 
 type EthWalletMode = 'demo' | 'metamask';
@@ -275,9 +276,81 @@ export function App() {
       setEthWalletMode('metamask');
       const bal = await getWpolyxBalance(address, ethCfg);
       setMmWpolyx(bal.toString());
-      push('ok', `MetaMask connected: ${shortAddr(address)}`);
+      await watchWpolyxToken(ethCfg);
+      push('ok', `MetaMask connected: ${shortAddr(address)} on ${ethCfg.chainName ?? 'chain'}`);
     } catch (err) {
       push('err', (err as Error).message);
+    }
+  }
+
+  /**
+   * Local faucet: lock //Bob POLYX → mint wPOLYX to MetaMask, then switch UI to Eth→Poly.
+   */
+  async function onGetTestWpolyx() {
+    if (!ethCfg) {
+      push('err', 'Config not loaded');
+      return;
+    }
+    if (status?.network === 'testnet') {
+      push(
+        'err',
+        'Use CLI on testnet: cd bridge/relayer && yarn faucet:wpolyx <yourAddr> 5 "<mnemonic>"',
+      );
+      return;
+    }
+    let address = mmAddress;
+    if (!address) {
+      try {
+        const connected = await connectMetaMask(ethCfg);
+        address = connected.address;
+        setMmAddress(address);
+        setEthWalletMode('metamask');
+      } catch (err) {
+        push('err', (err as Error).message);
+        return;
+      }
+    }
+    setBusy(true);
+    try {
+      push('wait', `Requesting 10 test wPOLYX → ${shortAddr(address)} (lock + relayer mint)…`);
+      const result = await api.faucetWpolyx({ ethRecipient: address, amount: '10' });
+      setTrackedIntentId(result.intentId);
+      push('wait', `Locked. Waiting for mint (intent ${result.intentId.slice(0, 8)}…)…`);
+
+      // Poll transfer status until completed (up to ~3 min).
+      const deadline = Date.now() + 180_000;
+      let done = false;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 3000));
+        try {
+          const { transfer } = await api.transfer(result.intentId);
+          if (transfer.status === 'completed') {
+            done = true;
+            break;
+          }
+          if (transfer.status === 'failed') {
+            throw new Error(transfer.error || 'mint failed');
+          }
+        } catch (e) {
+          if ((e as Error).message.includes('mint failed')) throw e;
+        }
+      }
+      if (!done) throw new Error('Timeout waiting for mint — check relayer logs');
+
+      await watchWpolyxToken(ethCfg);
+      const bal = await getWpolyxBalance(address, ethCfg);
+      setMmWpolyx(bal.toString());
+      setEthWalletMode('metamask');
+      setDirection('eth_to_poly');
+      push(
+        'ok',
+        `Received ${formatPolyx(bal.toString())} wPOLYX in MetaMask. Direction set to To Polymesh — pick recipient and burn.`,
+      );
+      await refresh();
+    } catch (err) {
+      push('err', (err as Error).message);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -474,6 +547,7 @@ export function App() {
               onRefresh={() => void refresh()}
               onConnectMetaMask={() => void onConnectMetaMask()}
               onDisconnectMetaMask={onDisconnectMetaMask}
+              onGetTestWpolyx={() => void onGetTestWpolyx()}
             />
           )}
           {tab === 'portfolio' && (
@@ -668,6 +742,7 @@ function BridgePage(props: {
   onRefresh: () => void;
   onConnectMetaMask: () => void;
   onDisconnectMetaMask: () => void;
+  onGetTestWpolyx: () => void;
 }) {
   const {
     status,
@@ -699,6 +774,7 @@ function BridgePage(props: {
     onRefresh,
     onConnectMetaMask,
     onDisconnectMetaMask,
+    onGetTestWpolyx,
   } = props;
 
   const tracked = trackedIntentId
@@ -789,29 +865,72 @@ function BridgePage(props: {
               </button>
             </div>
 
-            {ethWalletMode === 'metamask' && (
-              <div className="summary-card" style={{ marginTop: 0, marginBottom: 14 }}>
-                {mmAddress ? (
-                  <>
-                    Connected <strong className="mono">{shortAddr(mmAddress, 6)}</strong> ·{' '}
-                    {ethWpolyxDisplay} wPOLYX
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ marginLeft: 8 }}
-                      onClick={onDisconnectMetaMask}
-                    >
-                      Disconnect
-                    </button>
-                  </>
+            <div className="summary-card" style={{ marginTop: 0, marginBottom: 14 }}>
+              <strong>MetaMask path (Eth → Polymesh)</strong>
+              <ol style={{ margin: '8px 0 0', paddingLeft: 18, color: 'var(--text-secondary)' }}>
+                <li>Connect MetaMask (local Anvil or Sepolia).</li>
+                <li>
+                  Get test <strong>wPOLYX</strong> into the wallet (button below on local).
+                </li>
+                <li>
+                  Choose <strong>To Polymesh</strong>, pick recipient (Bob/Alice), burn.
+                </li>
+              </ol>
+              <div className="quick-row" style={{ marginTop: 12 }}>
+                {!mmAddress ? (
+                  <button type="button" className="btn btn-primary" onClick={onConnectMetaMask} disabled={busy}>
+                    1. Connect MetaMask
+                  </button>
                 ) : (
-                  <>
-                    MetaMask not connected.{' '}
-                    <button type="button" className="btn btn-ghost" onClick={onConnectMetaMask}>
-                      Connect
-                    </button>
-                  </>
+                  <button type="button" className="btn btn-secondary" onClick={onDisconnectMetaMask}>
+                    {shortAddr(mmAddress, 4)} · {ethWpolyxDisplay} wPOLYX
+                  </button>
                 )}
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={onGetTestWpolyx}
+                  disabled={busy || status?.network === 'testnet'}
+                  title={
+                    status?.network === 'testnet'
+                      ? 'On testnet use yarn faucet:wpolyx with a funded mnemonic'
+                      : 'Mint 10 wPOLYX to your MetaMask via local faucet'
+                  }
+                >
+                  2. Get test wPOLYX
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setEthWalletMode('metamask');
+                    setDirection('eth_to_poly');
+                    setAmount('1');
+                  }}
+                  disabled={!mmAddress}
+                >
+                  3. Switch to To Polymesh
+                </button>
+              </div>
+              {status?.network === 'testnet' && (
+                <p className="row-meta" style={{ marginTop: 10 }}>
+                  Testnet: fund wPOLYX with{' '}
+                  <code>yarn faucet:wpolyx &lt;addr&gt; 5 &quot;mnemonic&quot;</code> after you have
+                  test POLYX (see TESTNET.md / METAMASK.md).
+                </p>
+              )}
+            </div>
+
+            {ethWalletMode === 'metamask' && mmAddress && (
+              <div className="balance-line" style={{ marginBottom: 12 }}>
+                MetaMask {shortAddr(mmAddress, 6)} · {ethWpolyxDisplay} wPOLYX · chain{' '}
+                {status?.eth.chainName ?? status?.eth.chainId}
+                {status?.eth.wPolyxAddress ? (
+                  <>
+                    {' · token '}
+                    <span className="mono">{shortAddr(status.eth.wPolyxAddress, 6)}</span>
+                  </>
+                ) : null}
               </div>
             )}
 
