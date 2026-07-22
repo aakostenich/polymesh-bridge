@@ -11,7 +11,9 @@ const addressByMnemonic = new Map<string, string>();
 async function ensureConnected(): Promise<Polymesh> {
   if (_sdk) return _sdk;
 
-  const accounts = POLYMESH_DEV_ACCOUNTS.map((a) => ({ mnemonic: a.mnemonic }));
+  const accounts: Array<{ mnemonic: string }> = POLYMESH_DEV_ACCOUNTS.map((a) => ({
+    mnemonic: a.mnemonic,
+  }));
   // Always include escrow mnemonic in case it isn't one of the named dev keys.
   if (!accounts.some((a) => a.mnemonic === config.polymesh.escrowMnemonic)) {
     accounts.push({ mnemonic: config.polymesh.escrowMnemonic });

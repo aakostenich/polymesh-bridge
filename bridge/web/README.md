@@ -32,10 +32,17 @@ Open **http://localhost:5173**
 | Relayer intent API | `3006` |
 | Anvil | `8546` |
 
-## What you can click
+## App tabs
 
-1. **Polymesh → Ethereum** — pick Bob/Alice/Dave, amount, Anvil recipient → locks POLYX and waits for the relayer to mint wPOLYX.
-2. **Ethereum → Polymesh** — flip direction, burn wPOLYX from an Anvil account → relayer releases POLYX from escrow.
-3. Live **status pills**, balances, activity log, and recent on-chain bridge events.
+| Tab | Purpose |
+|---|---|
+| **Home** | Crypto-style welcome / hero, stats, features, CTA |
+| **Bridge** | Two-way transfer UI |
+| **Portfolio** | Polymesh + Anvil balances |
+| **Activity** | Session log + on-chain events |
+| **Network** | Health of node, Anvil, relayer, contracts |
+| **Docs** | How the lock-mint bridge works |
+
+Dark blue/white theme is default; toggle light mode in the nav.
 
 Config is read from `bridge/relayer/.env` (override with `bridge/web/.env` if needed).
