@@ -9,6 +9,7 @@ node_modules/
 
 # Build artifacts
 dist/
+web/dist/
 *.tsbuildinfo
 
 # Local environment / secrets

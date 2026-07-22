@@ -82,7 +82,18 @@ yarn bootstrap        # funds escrow from dev //Alice (one-time, fresh chain)
 yarn start
 ```
 
-### 5. Exercise both directions
+### 5. Open the web UI (easiest way to click around)
+
+```bash
+cd bridge/web
+yarn install
+yarn dev
+```
+
+Open **http://localhost:5173** — pick accounts, amounts, flip direction, bridge both ways.
+See `bridge/web/README.md` for details.
+
+### 6. Or exercise both directions via CLI
 
 ```bash
 # Polymesh -> Ethereum: lock POLYX (sender //Bob) to receive wPOLYX at an Eth address
@@ -205,6 +216,10 @@ bridge/
 │       └── ops/
 │           ├── bootstrap-escrow.ts
 │           └── lock-polyx.ts
+├── web/                            Local demo UI (Vite + Express)
+│   ├── README.md
+│   ├── server/                     Polymesh lock / balances API
+│   └── src/                        React frontend
 └── scripts/
     ├── deploy-eth.sh
     └── bridge-smoke-test.sh
