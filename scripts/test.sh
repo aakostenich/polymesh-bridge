@@ -7,12 +7,24 @@ set -e
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 START_STOP_ARGS=()
+# Args that only apply to start-env.sh (stop-env.sh would reject them).
+START_ONLY_ARGS=()
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--env-file|--profile)
 			START_STOP_ARGS+=("$1" "$2")
 			shift 2
+			;;
+		--pull)
+			# Policy argument is optional; a bare `--pull` means `always`.
+			if [[ -n "${2:-}" && "$2" != -* ]]; then
+				START_ONLY_ARGS+=("$1" "$2")
+				shift 2
+			else
+				START_ONLY_ARGS+=("$1")
+				shift
+			fi
 			;;
 		--)
 			shift
@@ -25,7 +37,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo "[ENV TEST] Starting environment..."
-"${SCRIPT_DIR}/start-env.sh" "${START_STOP_ARGS[@]}"
+"${SCRIPT_DIR}/start-env.sh" "${START_STOP_ARGS[@]}" "${START_ONLY_ARGS[@]}"
 
 echo "[ENV TEST] Running tests..."
 "${SCRIPT_DIR}/run-tests.sh"

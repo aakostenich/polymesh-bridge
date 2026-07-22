@@ -74,11 +74,37 @@ Polymesh v8 includes Revive-based smart contract support, so optional EVM toolin
 ./scripts/start-env.sh --env-file envs/8.0
 ```
 
+`--env-file` is optional; if omitted, both `start-env.sh` and `stop-env.sh`
+default to `envs/latest`. You can also override the default via the
+`COMPOSE_ENV` environment variable.
+
 Stop:
 
 ```bash
 ./scripts/stop-env.sh --env-file envs/8.0
 ```
+
+To always fetch the newest images before starting (recommended when an env
+file uses floating tags such as `latest`), add `--pull always`:
+
+```bash
+./scripts/start-env.sh --env-file envs/latest --pull always
+```
+
+`--pull` accepts any Docker Compose pull policy (`always`, `missing`, `never`,
+`build`); a bare `--pull` is shorthand for `always`. The same behaviour can be
+set via the `COMPOSE_PULL_POLICY` environment variable.
+
+By default `stop-env.sh` removes the named volumes (chain data, Vault keys,
+Blockscout DB, ...) for a clean slate. To stop the containers but keep the data
+for the next start, pass `--keep-volumes`:
+
+```bash
+./scripts/stop-env.sh --env-file envs/8.0 --keep-volumes
+```
+
+`stop-env.sh` always tears down the EVM tooling as well, so you do not need to
+repeat `--profile evm` when stopping.
 
 ### Option 2: With EVM tooling
 
@@ -86,10 +112,10 @@ Stop:
 ./scripts/start-env.sh --env-file envs/8.0 --profile evm
 ```
 
-Stop:
+Stop (the EVM services are torn down automatically):
 
 ```bash
-./scripts/stop-env.sh --env-file envs/8.0 --profile evm
+./scripts/stop-env.sh --env-file envs/8.0
 ```
 
 Smoke checks:
