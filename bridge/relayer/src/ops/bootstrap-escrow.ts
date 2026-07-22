@@ -23,6 +23,16 @@ const ALICE_MNEMONIC = '//Alice';
 const DEFAULT_AMOUNT = new BigNumber(1_000_000).multipliedBy(10 ** 6);
 
 async function main(): Promise<void> {
+  if (config.network === 'testnet') {
+    console.error(
+      '[BOOTSTRAP] Refusing to run on testnet. //Alice does not exist there.\n' +
+        '  Fund the escrow manually with test POLYX:\n' +
+        '    yarn addresses:testnet   # print escrow SS58\n' +
+        '  See bridge/TESTNET.md',
+    );
+    process.exit(2);
+  }
+
   const amountArg = process.argv[2];
   const amount = amountArg ? new BigNumber(amountArg) : DEFAULT_AMOUNT;
 

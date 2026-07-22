@@ -1,3 +1,9 @@
+export type StatusWarning = {
+  code: string;
+  level: 'warn' | 'error';
+  message: string;
+};
+
 export type StatusResponse = {
   network?: string;
   eth: {
@@ -12,6 +18,8 @@ export type StatusResponse = {
     paused: boolean | null;
     nonce: string | null;
     relayer: string | null;
+    relayerKeyAddress?: string | null;
+    relayerEthBalance?: string | null;
     wPolyxSupply: string | null;
     error?: string;
   };
@@ -19,6 +27,7 @@ export type StatusResponse = {
     ok: boolean;
     nodeUrl: string;
     portalUrl?: string | null;
+    explorerUrl?: string | null;
     escrow: string;
     escrowBalance: string;
     error?: string;
@@ -39,6 +48,14 @@ export type StatusResponse = {
     dailyVolumePolyx: string;
     dailyUsedPolyx: string;
   } | null;
+  warnings?: StatusWarning[];
+  explorers?: {
+    ethBridge?: string | null;
+    ethWpolyx?: string | null;
+    ethTxPrefix?: string | null;
+    polyEscrow?: string | null;
+    polyPortal?: string | null;
+  };
 };
 
 export type PolyAccount = {

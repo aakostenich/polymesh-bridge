@@ -424,15 +424,14 @@ export function App() {
           </div>
         )}
 
-        {!status?.relayer.ok && status && tab !== 'home' && (
-          <div className="alert warn">
-            <AlertIcon />
-            <div>
-              Relayer offline — transfers won&apos;t complete.{' '}
-              <code>cd bridge/relayer && yarn start</code>
+        {status?.warnings
+          ?.filter((w) => tab !== 'home' || w.level === 'error')
+          .map((w) => (
+            <div key={w.code} className={`alert ${w.level === 'error' ? 'err' : 'warn'}`}>
+              <AlertIcon />
+              <div>{w.message}</div>
             </div>
-          </div>
-        )}
+          ))}
 
         <div className="page-enter" key={tab}>
           {tab === 'home' && (
@@ -1015,7 +1014,10 @@ function BridgePage(props: {
             </div>
             <div className="card-body">
               {tracked ? (
-                <TransferStatusCard transfer={tracked} />
+                <TransferStatusCard
+                  transfer={tracked}
+                  ethTxPrefix={status?.explorers?.ethTxPrefix}
+                />
               ) : (
                 <div className="feed-empty">Submit a transfer to track its state machine.</div>
               )}
@@ -1258,15 +1260,28 @@ function ActivityPage(props: {
 
 function NetworkPage(props: { status: StatusResponse | null; onRefresh: () => void }) {
   const s = props.status;
+  const ethName = s?.eth.chainName ?? (s?.eth.chainId === 11155111 ? 'Sepolia' : 'Anvil');
   return (
     <>
       <h2 className="page-title">Network</h2>
-      <p className="page-sub">Live health of Polymesh, Anvil, contracts, and the relayer.</p>
+      <p className="page-sub">
+        Live health · profile <strong>{s?.network ?? '…'}</strong> · {ethName}
+      </p>
 
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 16, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <button type="button" className="btn btn-secondary" onClick={props.onRefresh}>
           Refresh status
         </button>
+        {s?.explorers?.polyPortal && (
+          <a className="btn btn-secondary" href={s.explorers.polyPortal} target="_blank" rel="noreferrer">
+            Polymesh portal
+          </a>
+        )}
+        {s?.explorers?.ethBridge && (
+          <a className="btn btn-secondary" href={s.explorers.ethBridge} target="_blank" rel="noreferrer">
+            Bridge on explorer
+          </a>
+        )}
       </div>
 
       <div className="info-grid">
@@ -1283,10 +1298,17 @@ function NetworkPage(props: { status: StatusResponse | null; onRefresh: () => vo
             Escrow {s?.polymesh.escrow ? shortAddr(s.polymesh.escrow, 8) : '—'} ·{' '}
             {s ? formatPolyx(s.polymesh.escrowBalance) : '—'} POLYX
           </div>
+          {s?.explorers?.polyEscrow && (
+            <div className="row-meta" style={{ marginTop: 6 }}>
+              <a href={s.explorers.polyEscrow} target="_blank" rel="noreferrer">
+                View escrow on Subscan
+              </a>
+            </div>
+          )}
         </div>
 
         <div className="info-tile">
-          <div className="k">Ethereum (Anvil)</div>
+          <div className="k">Ethereum ({ethName})</div>
           <div className={`status-dot-row ${s?.eth.ok ? 'ok' : 'bad'}`}>
             <span className="dot" />
             {s?.eth.ok ? `Block ${s.eth.block}` : 'Down'}
@@ -1296,6 +1318,9 @@ function NetworkPage(props: { status: StatusResponse | null; onRefresh: () => vo
           </div>
           <div className="row-meta" style={{ marginTop: 6 }}>
             Chain ID {s?.eth.chainId ?? '—'}
+            {s?.eth.relayerEthBalance
+              ? ` · relayer gas ${formatEthWei(s.eth.relayerEthBalance)} ETH`
+              : ''}
           </div>
         </div>
 
@@ -1310,6 +1335,7 @@ function NetworkPage(props: { status: StatusResponse | null; onRefresh: () => vo
           </div>
           <div className="row-meta" style={{ marginTop: 6 }}>
             {s?.relayer.detail ?? ''}
+            {s?.relayer.authRequired ? ' · auth on' : ''}
           </div>
         </div>
 
@@ -1319,13 +1345,25 @@ function NetworkPage(props: { status: StatusResponse | null; onRefresh: () => vo
             Bridge
           </div>
           <div className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-            {s?.eth.bridgeAddress ?? '—'}
+            {s?.explorers?.ethBridge ? (
+              <a href={s.explorers.ethBridge} target="_blank" rel="noreferrer">
+                {s.eth.bridgeAddress}
+              </a>
+            ) : (
+              (s?.eth.bridgeAddress ?? '—')
+            )}
           </div>
           <div className="v" style={{ marginTop: 10 }}>
             wPOLYX
           </div>
           <div className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-            {s?.eth.wPolyxAddress ?? '—'}
+            {s?.explorers?.ethWpolyx ? (
+              <a href={s.explorers.ethWpolyx} target="_blank" rel="noreferrer">
+                {s.eth.wPolyxAddress}
+              </a>
+            ) : (
+              (s?.eth.wPolyxAddress ?? '—')
+            )}
           </div>
           <div className="row-meta" style={{ marginTop: 8 }}>
             Relayer role {s?.eth.relayer ? shortAddr(s.eth.relayer, 6) : '—'} · nonce{' '}
@@ -1335,6 +1373,15 @@ function NetworkPage(props: { status: StatusResponse | null; onRefresh: () => vo
       </div>
     </>
   );
+}
+
+function formatEthWei(wei: string): string {
+  try {
+    const n = Number(wei) / 1e18;
+    return n.toFixed(n >= 1 ? 3 : 4);
+  } catch {
+    return '—';
+  }
 }
 
 function DocsPage(props: { onLaunch: () => void }) {
@@ -1413,8 +1460,17 @@ function statusToLevel(status: TransferStatus): LogLevel {
   return 'info';
 }
 
-function TransferStatusCard(props: { transfer: TransferRecord }) {
+function TransferStatusCard(props: {
+  transfer: TransferRecord;
+  ethTxPrefix?: string | null;
+}) {
   const t = props.transfer;
+  const txLink =
+    props.ethTxPrefix && t.relayedTxHash
+      ? `${props.ethTxPrefix}${t.relayedTxHash}`
+      : props.ethTxPrefix && t.ethTxHash
+        ? `${props.ethTxPrefix}${t.ethTxHash}`
+        : null;
   const steps =
     t.direction === 'poly_to_eth'
       ? (['intent_registered', 'locked', 'relaying', 'completed'] as TransferStatus[])
@@ -1459,10 +1515,20 @@ function TransferStatusCard(props: { transfer: TransferRecord }) {
         Amount {formatPolyx(t.amount)}
         {t.relayedTxHash ? ` · relayed ${shortAddr(t.relayedTxHash, 6)}` : ''}
         {t.error ? ` · ${t.error}` : ''}
+        {txLink ? (
+          <>
+            {' · '}
+            <a href={txLink} target="_blank" rel="noreferrer">
+              view tx
+            </a>
+          </>
+        ) : null}
       </div>
     </div>
   );
 }
+
+
 
 /* ─── Small components ─────────────────────────────────────────────────── */
 

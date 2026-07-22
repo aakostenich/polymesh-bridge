@@ -1,6 +1,6 @@
 import cors from 'cors';
 import express from 'express';
-import { Contract, JsonRpcProvider, formatUnits } from 'ethers';
+import { Contract, JsonRpcProvider, Wallet, formatEther, formatUnits, getAddress } from 'ethers';
 
 import { ANVIL_ACCOUNTS, config } from './config.js';
 import {
@@ -102,11 +102,13 @@ app.get('/api/status', async (_req, res) => {
     let bridgeNonce: string | null = null;
     let wPolyxSupply: string | null = null;
     let onChainRelayer: string | null = null;
+    let relayerEthBalance: string | null = null;
+    let relayerKeyAddress: string | null = null;
     if (ethOk) {
       try {
         const bridge = new Contract(config.eth.bridgeAddress, BRIDGE_ABI, provider);
         const wpolyx = new Contract(config.eth.wPolyxAddress, WPOLYX_ABI, provider);
-        const [paused, nonce, relayer, supply] = await Promise.all([
+        const [paused, nonce, relayerAddr, supply] = await Promise.all([
           bridge.paused() as Promise<boolean>,
           bridge.nonce() as Promise<bigint>,
           bridge.relayer() as Promise<string>,
@@ -114,14 +116,88 @@ app.get('/api/status', async (_req, res) => {
         ]);
         bridgePaused = paused;
         bridgeNonce = nonce.toString();
-        onChainRelayer = relayer;
+        onChainRelayer = relayerAddr;
         wPolyxSupply = supply.toString();
       } catch (err) {
         ethError = (err as Error).message;
       }
+      try {
+        // Optional: only if a relayer key is configured (local/testnet .env).
+        const key = process.env.BRIDGE_ETH_RELAYER_KEY;
+        if (key) {
+          const w = new Wallet(key, provider);
+          relayerKeyAddress = w.address;
+          relayerEthBalance = (await provider.getBalance(w.address)).toString();
+        }
+      } catch {
+        /* ignore key/balance probe */
+      }
     }
 
     const relayer = await probeRelayer();
+
+    // Operational warnings for the UI.
+    const warnings: Array<{ code: string; level: 'warn' | 'error'; message: string }> = [];
+    const zero = '0x0000000000000000000000000000000000000000';
+    try {
+      if (
+        getAddress(config.eth.bridgeAddress) === getAddress(zero) ||
+        getAddress(config.eth.wPolyxAddress) === getAddress(zero)
+      ) {
+        warnings.push({
+          code: 'contracts_not_deployed',
+          level: 'error',
+          message: 'Bridge contracts not configured (zero addresses). Deploy and set BRIDGE_ADDRESS / WPOLYX_ADDRESS.',
+        });
+      }
+    } catch {
+      /* invalid address */
+    }
+    if (polyOk) {
+      const escrowPolyx = Number(escrowBalance) / 1e6;
+      const minEscrow = config.network === 'testnet' ? 10 : 1;
+      if (escrowPolyx < minEscrow) {
+        warnings.push({
+          code: 'escrow_low',
+          level: config.network === 'testnet' ? 'error' : 'warn',
+          message: `Escrow has ${escrowPolyx.toFixed(4)} POLYX (recommend ≥ ${minEscrow}). Eth→Poly releases may fail.`,
+        });
+      }
+    }
+    if (relayerEthBalance !== null) {
+      const eth = Number(formatEther(BigInt(relayerEthBalance)));
+      const minEth = config.network === 'testnet' ? 0.02 : 0.001;
+      if (eth < minEth) {
+        warnings.push({
+          code: 'relayer_eth_low',
+          level: config.network === 'testnet' ? 'error' : 'warn',
+          message: `Relayer wallet has ${eth.toFixed(4)} ETH (recommend ≥ ${minEth}) for mint gas.`,
+        });
+      }
+    }
+    if (relayerKeyAddress && onChainRelayer) {
+      try {
+        if (getAddress(relayerKeyAddress) !== getAddress(onChainRelayer)) {
+          warnings.push({
+            code: 'relayer_mismatch',
+            level: 'error',
+            message: `Relayer key ${relayerKeyAddress} ≠ on-chain relayer ${onChainRelayer}.`,
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!relayer.ok) {
+      warnings.push({
+        code: 'relayer_offline',
+        level: 'error',
+        message: `Relayer API offline (${relayer.detail}). Run yarn start / yarn start:testnet in bridge/relayer.`,
+      });
+    }
+
+    const polyExplorerBase =
+      config.network === 'testnet' ? 'https://polymesh-testnet.subscan.io' : null;
 
     res.json({
       network: config.network,
@@ -137,6 +213,8 @@ app.get('/api/status', async (_req, res) => {
         paused: bridgePaused,
         nonce: bridgeNonce,
         relayer: onChainRelayer,
+        relayerKeyAddress,
+        relayerEthBalance,
         wPolyxSupply,
         error: ethError,
       },
@@ -144,6 +222,7 @@ app.get('/api/status', async (_req, res) => {
         ok: polyOk,
         nodeUrl: config.polymesh.nodeUrl,
         portalUrl: config.polymesh.portalUrl,
+        explorerUrl: polyExplorerBase,
         escrow,
         escrowBalance,
         error: polyError,
@@ -155,6 +234,18 @@ app.get('/api/status', async (_req, res) => {
         authRequired: relayer.authRequired ?? Boolean(config.apiToken),
       },
       caps: relayer.caps ?? null,
+      warnings,
+      explorers: {
+        ethBridge: config.eth.explorerUrl
+          ? `${config.eth.explorerUrl}/address/${config.eth.bridgeAddress}`
+          : null,
+        ethWpolyx: config.eth.explorerUrl
+          ? `${config.eth.explorerUrl}/token/${config.eth.wPolyxAddress}`
+          : null,
+        ethTxPrefix: config.eth.explorerUrl ? `${config.eth.explorerUrl}/tx/` : null,
+        polyEscrow: polyExplorerBase && escrow ? `${polyExplorerBase}/account/${escrow}` : null,
+        polyPortal: config.polymesh.portalUrl,
+      },
     });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });

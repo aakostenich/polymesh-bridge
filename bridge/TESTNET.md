@@ -134,7 +134,25 @@ From portal or your tooling:
 
 ---
 
-## 5. Run relayer (testnet)
+## 5. Print addresses & readiness check
+
+```bash
+cd bridge/relayer
+yarn install
+
+# Escrow SS58 + relayer ETH address + balances
+yarn addresses:testnet
+
+# Full readiness (RPC, contracts, gas, escrow, intent API)
+# Start relayer in another terminal first for the API check to pass.
+yarn start:testnet          # terminal A
+yarn check:testnet          # terminal B
+# or: ./bridge/scripts/check-testnet-ready.sh
+```
+
+`yarn check:testnet` exits non-zero if blockers (missing deploy, empty gas, empty escrow, wrong relayer role).
+
+## 6. Run relayer (testnet)
 
 ```bash
 cd bridge/relayer
@@ -159,11 +177,12 @@ curl -s http://127.0.0.1:3006/health | jq
 
 ---
 
-## 6. Run web UI against testnet
+## 7. Run web UI against testnet
 
 ```bash
 cd bridge/web
-BRIDGE_NETWORK=testnet yarn dev
+yarn dev:testnet
+# or: BRIDGE_NETWORK=testnet yarn dev
 ```
 
 1. Open http://localhost:5173  
@@ -181,14 +200,15 @@ BRIDGE_NETWORK=testnet yarn lock "<testnet user mnemonic>" 0xYourMetaMask 1.0
 
 ---
 
-## 7. First-transfer checklist
+## 8. First-transfer checklist
 
 - [ ] Sepolia ETH on deployer + relayer  
 - [ ] Polymesh DID + test POLYX on user  
-- [ ] Escrow funded with test POLYX  
+- [ ] Escrow funded with test POLYX (`yarn addresses:testnet` for SS58)  
 - [ ] `deploy-eth.sh --network sepolia` succeeded  
 - [ ] Addresses in `.env.testnet`  
-- [ ] `yarn start:testnet` healthy  
+- [ ] `yarn start:testnet` + `yarn check:testnet` OK  
+- [ ] UI warnings clear (Network tab + banners)  
 - [ ] Lock 0.1–1 POLYX → mint seen on Etherscan  
 - [ ] Burn half → POLYX back on Subscan  
 

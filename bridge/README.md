@@ -93,6 +93,8 @@ yarn bootstrap        # funds escrow from dev //Alice (one-time, fresh chain)
 ```bash
 yarn start              # local (.env)
 yarn start:testnet      # loads .env.testnet (BRIDGE_NETWORK=testnet)
+yarn addresses:testnet  # print escrow SS58 + relayer ETH address
+yarn check:testnet      # readiness (RPC, contracts, balances, API)
 ```
 
 ### 5. Open the web UI (easiest way to click around)
