@@ -14,7 +14,7 @@ services:
       POSTGRES_DB: postgres
 
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -48,7 +48,7 @@ services:
       - -f=/app
       - --local
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://subquery-node:3000/ready"]
+      test: ['CMD', 'curl', '--fail', 'http://subquery-node:3000/ready']
       interval: 20s
       timeout: 5s
       retries: 20
@@ -81,10 +81,10 @@ services:
     healthcheck:
       test:
         [
-          "CMD",
-          "curl",
-          "--fail",
-          "subquery-graphql:3000/.well-known/apollo/server-health",
+          'CMD',
+          'curl',
+          '--fail',
+          'subquery-graphql:3000/.well-known/apollo/server-health',
         ]
       interval: 10s
       timeout: 5s
@@ -121,7 +121,7 @@ services:
       - source: polymesh-healthcheck-libp2p
         target: /usr/local/bin/polymesh-healthcheck-libp2p.sh
     healthcheck:
-      test: ["CMD", "/usr/local/bin/polymesh-healthcheck-libp2p.sh"]
+      test: ['CMD', '/usr/local/bin/polymesh-healthcheck-libp2p.sh']
       interval: 10s
       timeout: 5s
       retries: 10
@@ -150,17 +150,17 @@ services:
       PORT: 3000
       POLYMESH_NODE_URL: ${POLYMESH_CHAIN_WS:-ws://polymesh-node:9944}
       POLYMESH_MIDDLEWARE_V2_URL: ${REST_MIDDLEWARE_URL:-http://subquery-graphql:3000}
-      AUTH_STRATEGY: "open"
+      AUTH_STRATEGY: 'open'
       DEVELOPER_UTILS: true
-      VAULT_URL: "http://vault:8200/v1/transit"
+      VAULT_URL: 'http://vault:8200/v1/transit'
     healthcheck:
       test:
         [
-          "CMD",
-          "wget",
-          "--spider",
-          "-q",
-          "http://polymesh-rest-api-vault-sm:3000/network/latest-block",
+          'CMD',
+          'wget',
+          '--spider',
+          '-q',
+          'http://polymesh-rest-api-vault-sm:3000/network/latest-block',
         ]
       interval: 30s
       timeout: 5s
@@ -172,7 +172,7 @@ services:
     depends_on:
       polymesh-rest-api-vault-sm:
         condition: service_healthy
-    restart: "no"
+    restart: 'no'
     entrypoint: /opt/polymesh-rest-api/init.sh
     networks:
       - polymesh
@@ -205,18 +205,18 @@ services:
       PORT: 3000
       POLYMESH_NODE_URL: ${POLYMESH_CHAIN_WS:-ws://polymesh-node:9944}
       POLYMESH_MIDDLEWARE_V2_URL: ${REST_MIDDLEWARE_URL:-http://subquery-graphql:3000}
-      LOCAL_SIGNERS: "alice,bob,charlie"
-      LOCAL_MNEMONICS: "//Alice,//Bob,//Charlie"
-      AUTH_STRATEGY: "open"
+      LOCAL_SIGNERS: 'alice,bob,charlie'
+      LOCAL_MNEMONICS: '//Alice,//Bob,//Charlie'
+      AUTH_STRATEGY: 'open'
       DEVELOPER_UTILS: true
     healthcheck:
       test:
         [
-          "CMD",
-          "wget",
-          "--spider",
-          "-q",
-          "http://polymesh-rest-api-local-sm:3000/network/latest-block",
+          'CMD',
+          'wget',
+          '--spider',
+          '-q',
+          'http://polymesh-rest-api-local-sm:3000/network/latest-block',
         ]
       interval: 30s
       timeout: 5s
@@ -240,7 +240,7 @@ services:
       - --node-rpc-url
       - ${POLYMESH_ETH_RPC_NODE_RPC_URL:-ws://polymesh-node:9944}
       - --rpc-port
-      - "8545"
+      - '8545'
       - --rpc-external
       - --rpc-cors=all
       - --allow-unprotected-txs
@@ -263,8 +263,8 @@ services:
     healthcheck:
       test:
         [
-          "CMD-SHELL",
-          "pg_isready -U ${POLYMESH_BLOCKSCOUT_POSTGRES_USER:-blockscout} -d ${POLYMESH_BLOCKSCOUT_POSTGRES_DB:-blockscout}",
+          'CMD-SHELL',
+          'pg_isready -U ${POLYMESH_BLOCKSCOUT_POSTGRES_USER:-blockscout} -d ${POLYMESH_BLOCKSCOUT_POSTGRES_DB:-blockscout}',
         ]
       interval: 10s
       timeout: 5s
@@ -302,7 +302,7 @@ services:
     command: >
       sh -c "bin/blockscout eval \"Elixir.Explorer.ReleaseTasks.create_and_migrate()\" && bin/blockscout start"
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - 'host.docker.internal:host-gateway'
     environment:
       ETHEREUM_JSONRPC_VARIANT: ${POLYMESH_BLOCKSCOUT_RPC_VARIANT:-geth}
       ETHEREUM_JSONRPC_HTTP_URL: ${POLYMESH_BLOCKSCOUT_RPC_HTTP_URL:-http://polymesh-eth-rpc:8545/}
@@ -311,6 +311,10 @@ services:
       DATABASE_URL: postgresql://${POLYMESH_BLOCKSCOUT_POSTGRES_USER:-blockscout}:${POLYMESH_BLOCKSCOUT_POSTGRES_PASSWORD:-blockscout}@blockscout-db:5432/${POLYMESH_BLOCKSCOUT_POSTGRES_DB:-blockscout}
       ECTO_USE_SSL: ${POLYMESH_BLOCKSCOUT_ECTO_USE_SSL:-false}
       ECTO_SSL_MODE: ${POLYMESH_BLOCKSCOUT_ECTO_SSL_MODE:-disable}
+      # Blockscout is a Phoenix (Elixir) app and requires SECRET_KEY_BASE to
+      # sign session cookies/tokens. This is a throwaway value for local dev
+      # only; override it via POLYMESH_BLOCKSCOUT_SECRET_KEY_BASE for any
+      # non-local/shared deployment.
       SECRET_KEY_BASE: ${POLYMESH_BLOCKSCOUT_SECRET_KEY_BASE:-56NtB48ear7+wMSf0IQuWDAAazhpb31qyc7GiyspBP2vh7t5zlCsF5QDv76chXeN}
       PORT: 4000
       COIN: ${POLYMESH_BLOCKSCOUT_COIN:-POLYX}
@@ -319,14 +323,14 @@ services:
       NETWORK: ${POLYMESH_BLOCKSCOUT_NETWORK:-Polymesh}
       SUBNETWORK: ${POLYMESH_BLOCKSCOUT_SUBNETWORK:-Polymesh Dev}
       INDEXER_DISABLE_PENDING_TRANSACTIONS_FETCHER: ${POLYMESH_BLOCKSCOUT_DISABLE_PENDING_TX_FETCHER:-true}
-      DISABLE_MARKET: "true"
-      ACCOUNT_ENABLED: "false"
-      DISABLE_WEBAPP: "false"
-      API_V1_READ_METHODS_DISABLED: "false"
-      API_V1_WRITE_METHODS_DISABLED: "false"
+      DISABLE_MARKET: 'true'
+      ACCOUNT_ENABLED: 'false'
+      DISABLE_WEBAPP: 'false'
+      API_V1_READ_METHODS_DISABLED: 'false'
+      API_V1_WRITE_METHODS_DISABLED: 'false'
       RATE_LIMITER_REDIS_URL: redis://blockscout-redis:6379/0
       ACCOUNT_REDIS_URL: redis://blockscout-redis:6379
-      RELEASE_LINK: ""
+      RELEASE_LINK: ''
     volumes:
       - blockscout-logs:/app/logs
       - blockscout-dets:/app/dets
@@ -382,10 +386,10 @@ services:
   # This will make sure vault is initialized and unsealed on the first run and unsealed on subsequent runs
   vault-init:
     image: hashicorp/vault:${VAULT_VERSION:-latest}
-    user: "0:0"
+    user: '0:0'
     networks:
       - polymesh
-    restart: "no"
+    restart: 'no'
     depends_on:
       vault:
         condition: service_started
@@ -398,7 +402,7 @@ services:
       - /vault/file
       - /vault/logs
     environment:
-      VAULT_ADDR: "http://vault:8200"
+      VAULT_ADDR: 'http://vault:8200'
       PGPASSWORD: postgres
       PGUSER: postgres
       PGDATABASE: services_status
@@ -443,7 +447,7 @@ services:
           exit 0
         fi
       '
-    restart: "no"
+    restart: 'no'
     networks:
       - polymesh
 
@@ -470,41 +474,41 @@ configs:
 volumes:
   psql-data:
     labels:
-      - "network.polymesh.project=polymesh"
-      - "network.polymesh.description=Indexer PostgreSQL data"
+      - 'network.polymesh.project=polymesh'
+      - 'network.polymesh.description=Indexer PostgreSQL data'
   chain-data:
     labels:
-      - "network.polymesh.project=polymesh"
-      - "network.polymesh.description=Polymesh chain data"
+      - 'network.polymesh.project=polymesh'
+      - 'network.polymesh.description=Polymesh chain data'
   vault-volume:
     labels:
-      - "network.polymesh.project=polymesh"
-      - "network.polymesh.description=Hashicorp Vault data"
+      - 'network.polymesh.project=polymesh'
+      - 'network.polymesh.description=Hashicorp Vault data'
   vault-log-volume:
     labels:
-      - "network.polymesh.project=polymesh"
-      - "network.polymesh.description=Hashicorp Vault logs"
+      - 'network.polymesh.project=polymesh'
+      - 'network.polymesh.description=Hashicorp Vault logs'
   vault-root-token:
     labels:
-      - "network.polymesh.project=polymesh"
-      - "network.polymesh.description=Hashicorp Vault root token"
+      - 'network.polymesh.project=polymesh'
+      - 'network.polymesh.description=Hashicorp Vault root token'
   rest-api-accounts-init:
     labels:
-      - "network.polymesh.project=polymesh"
-      - "network.polymesh.description=REST API signer init"
+      - 'network.polymesh.project=polymesh'
+      - 'network.polymesh.description=REST API signer init'
   blockscout-db-data:
     labels:
-      - "network.polymesh.project=polymesh"
-      - "network.polymesh.description=Blockscout PostgreSQL data"
+      - 'network.polymesh.project=polymesh'
+      - 'network.polymesh.description=Blockscout PostgreSQL data'
   blockscout-redis-data:
     labels:
-      - "network.polymesh.project=polymesh"
-      - "network.polymesh.description=Blockscout Redis data"
+      - 'network.polymesh.project=polymesh'
+      - 'network.polymesh.description=Blockscout Redis data'
   blockscout-logs:
     labels:
-      - "network.polymesh.project=polymesh"
-      - "network.polymesh.description=Blockscout backend logs"
+      - 'network.polymesh.project=polymesh'
+      - 'network.polymesh.description=Blockscout backend logs'
   blockscout-dets:
     labels:
-      - "network.polymesh.project=polymesh"
-      - "network.polymesh.description=Blockscout backend dets"
+      - 'network.polymesh.project=polymesh'
+      - 'network.polymesh.description=Blockscout backend dets'
