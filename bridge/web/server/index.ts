@@ -37,12 +37,18 @@ function ethProvider(): JsonRpcProvider {
 
 async function probeRelayer(): Promise<{ ok: boolean; detail: string }> {
   try {
-    // Intent API returns 404 for GET / — any TCP response means it's up.
-    const res = await fetch(config.intentApiUrl, { method: 'GET' });
-    return { ok: true, detail: `HTTP ${res.status}` };
+    const res = await fetch(`${config.intentApiUrl}/health`, { method: 'GET' });
+    if (!res.ok) return { ok: false, detail: `HTTP ${res.status}` };
+    return { ok: true, detail: 'healthy' };
   } catch (err) {
     return { ok: false, detail: (err as Error).message };
   }
+}
+
+async function proxyRelayer(path: string): Promise<{ status: number; body: unknown }> {
+  const res = await fetch(`${config.intentApiUrl}${path}`);
+  const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+  return { status: res.status, body };
 }
 
 app.get('/api/health', (_req, res) => {
@@ -223,6 +229,26 @@ app.post('/api/lock', async (req, res) => {
     res.status(201).json({ ok: true, ...result });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/** Proxy transfer status machine from the relayer (SQLite-backed). */
+app.get('/api/transfers', async (req, res) => {
+  try {
+    const limit = req.query.limit ? `?limit=${encodeURIComponent(String(req.query.limit))}` : '';
+    const { status, body } = await proxyRelayer(`/transfers${limit}`);
+    res.status(status).json(body);
+  } catch (err) {
+    res.status(502).json({ error: `relayer unreachable: ${(err as Error).message}` });
+  }
+});
+
+app.get('/api/transfers/:intentId', async (req, res) => {
+  try {
+    const { status, body } = await proxyRelayer(`/transfers/${encodeURIComponent(req.params.intentId)}`);
+    res.status(status).json(body);
+  } catch (err) {
+    res.status(502).json({ error: `relayer unreachable: ${(err as Error).message}` });
   }
 });
 

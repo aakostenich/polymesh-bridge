@@ -10,6 +10,8 @@
     "start": "tsx src/relayer.ts",
     "bootstrap": "tsx src/ops/bootstrap-escrow.ts",
     "lock": "tsx src/ops/lock-polyx.ts",
+    "e2e": "../scripts/e2e-bridge.sh",
+    "e2e:restart": "../scripts/e2e-bridge.sh --restart",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

@@ -6,6 +6,8 @@ import {
   type EthAccount,
   type PolyAccount,
   type StatusResponse,
+  type TransferRecord,
+  type TransferStatus,
 } from './lib/api';
 import {
   bridgeToPolymesh,
@@ -163,6 +165,8 @@ export function App() {
   const [polyAccounts, setPolyAccounts] = useState<PolyAccount[]>([]);
   const [ethAccounts, setEthAccounts] = useState<EthAccount[]>([]);
   const [events, setEvents] = useState<BridgeEvent[]>([]);
+  const [transfers, setTransfers] = useState<TransferRecord[]>([]);
+  const [trackedIntentId, setTrackedIntentId] = useState<string | null>(null);
   const [direction, setDirection] = useState<Direction>('poly_to_eth');
   const [amount, setAmount] = useState('10');
   const [polySender, setPolySender] = useState('//Bob');
@@ -182,16 +186,18 @@ export function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [s, poly, eth, ev] = await Promise.all([
+      const [s, poly, eth, ev, tr] = await Promise.all([
         api.status(),
         api.polyAccounts(),
         api.ethAccounts(),
         api.events().catch(() => ({ events: [] as BridgeEvent[], fromBlock: 0, toBlock: 0 })),
+        api.transfers(40),
       ]);
       setStatus(s);
       setPolyAccounts(poly.accounts);
       setEthAccounts(eth.accounts);
       setEvents(ev.events);
+      setTransfers(tr.transfers);
       setLoadError(null);
     } catch (err) {
       setLoadError((err as Error).message);
@@ -242,9 +248,10 @@ export function App() {
           ethRecipient: selectedEth.address,
           amount,
         });
+        setTrackedIntentId(result.intentId);
         push(
           'ok',
-          `Locked. ${result.txHash ? `Tx ${shortAddr(result.txHash, 6)}. ` : ''}Mint after finality.`,
+          `Locked intent ${result.intentId.slice(0, 8)}… memo ${result.memo}. Waiting for status → completed.`,
         );
       } else {
         push(
@@ -351,6 +358,8 @@ export function App() {
               ethAccounts={ethAccounts}
               events={events}
               activity={activity}
+              transfers={transfers}
+              trackedIntentId={trackedIntentId}
               direction={direction}
               setDirection={setDirection}
               amount={amount}
@@ -370,7 +379,9 @@ export function App() {
           {tab === 'portfolio' && (
             <PortfolioPage status={status} polyAccounts={polyAccounts} ethAccounts={ethAccounts} />
           )}
-          {tab === 'activity' && <ActivityPage activity={activity} events={events} />}
+          {tab === 'activity' && (
+            <ActivityPage activity={activity} events={events} transfers={transfers} />
+          )}
           {tab === 'network' && <NetworkPage status={status} onRefresh={() => void refresh()} />}
           {tab === 'docs' && <DocsPage onLaunch={goBridge} />}
         </div>
@@ -532,6 +543,8 @@ function BridgePage(props: {
   ethAccounts: EthAccount[];
   events: BridgeEvent[];
   activity: Activity[];
+  transfers: TransferRecord[];
+  trackedIntentId: string | null;
   direction: Direction;
   setDirection: (d: Direction) => void;
   amount: string;
@@ -553,6 +566,8 @@ function BridgePage(props: {
     ethAccounts,
     events,
     activity,
+    transfers,
+    trackedIntentId,
     direction,
     setDirection,
     amount,
@@ -568,6 +583,10 @@ function BridgePage(props: {
     onBridge,
     onRefresh,
   } = props;
+
+  const tracked = trackedIntentId
+    ? transfers.find((t) => t.intentId === trackedIntentId)
+    : transfers[0];
 
   const polyOptions = polyAccounts
     .filter((a) => !a.isEscrow)
@@ -793,12 +812,43 @@ function BridgePage(props: {
 
           <section className="card">
             <div className="card-header">
-              <h3>Recent activity</h3>
+              <h3>Transfer status</h3>
+            </div>
+            <div className="card-body">
+              {tracked ? (
+                <TransferStatusCard transfer={tracked} />
+              ) : (
+                <div className="feed-empty">Submit a transfer to track its state machine.</div>
+              )}
+              <div className="list-title" style={{ marginTop: 14 }}>
+                Recent transfers
+              </div>
+              <Feed
+                empty="No transfers in relayer DB yet."
+                items={transfers.slice(0, 8).map((t) => ({
+                  key: t.intentId,
+                  level: statusToLevel(t.status),
+                  time: t.status,
+                  body: (
+                    <>
+                      <strong>{t.direction === 'poly_to_eth' ? 'P→E' : 'E→P'}</strong>{' '}
+                      {formatPolyx(t.amount)} · {t.intentId.slice(0, 10)}…
+                      {t.error ? <div className="row-meta">{t.error}</div> : null}
+                    </>
+                  ),
+                }))}
+              />
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="card-header">
+              <h3>Session log</h3>
             </div>
             <div className="card-body">
               <Feed
-                empty="Transfers you make will show here."
-                items={activity.slice(0, 8).map((a) => ({
+                empty="Actions you take will show here."
+                items={activity.slice(0, 6).map((a) => ({
                   key: a.id,
                   level: a.level,
                   time: new Date(a.at).toLocaleTimeString(undefined, { hour12: false }),
@@ -815,7 +865,7 @@ function BridgePage(props: {
             <div className="card-body">
               <Feed
                 empty="No bridge events on Anvil yet."
-                items={events.slice(0, 8).map((e) => ({
+                items={events.slice(0, 6).map((e) => ({
                   key: `${e.type}-${e.id}-${e.txHash}`,
                   time: `#${e.blockNumber}`,
                   body:
@@ -916,12 +966,46 @@ function PortfolioPage(props: {
   );
 }
 
-function ActivityPage(props: { activity: Activity[]; events: BridgeEvent[] }) {
-  const { activity, events } = props;
+function ActivityPage(props: {
+  activity: Activity[];
+  events: BridgeEvent[];
+  transfers: TransferRecord[];
+}) {
+  const { activity, events, transfers } = props;
   return (
     <>
       <h2 className="page-title">Activity</h2>
-      <p className="page-sub">Session actions and recent on-chain bridge events.</p>
+      <p className="page-sub">Transfer state machine, session log, and on-chain events.</p>
+
+      <section className="card" style={{ marginBottom: 16 }}>
+        <div className="card-header">
+          <h3>Transfers (status machine)</h3>
+        </div>
+        <div className="card-body">
+          <Feed
+            tall
+            empty="No transfers yet. Bridge a payment to populate SQLite statuses."
+            items={transfers.map((t) => ({
+              key: t.intentId,
+              level: statusToLevel(t.status),
+              time: t.status,
+              body: (
+                <>
+                  <strong>{t.direction === 'poly_to_eth' ? 'Polymesh → Eth' : 'Eth → Polymesh'}</strong>
+                  {' · '}
+                  {formatPolyx(t.amount)}
+                  <div className="row-meta mono">
+                    {t.intentId}
+                    {t.relayedTxHash ? ` · relay ${shortAddr(t.relayedTxHash, 6)}` : ''}
+                  </div>
+                  {t.error ? <div className="row-meta">{t.error}</div> : null}
+                </>
+              ),
+            }))}
+          />
+        </div>
+      </section>
+
       <div className="layout-2">
         <section className="card">
           <div className="card-header">
@@ -1071,11 +1155,14 @@ function DocsPage(props: { onLaunch: () => void }) {
             </p>
           </div>
           <div className="docs-block">
-            <h4>Polymesh → Ethereum</h4>
+            <h4>Polymesh → Ethereum (intent id)</h4>
             <ul>
-              <li>UI registers a lock intent with the relayer (eth recipient + amount).</li>
-              <li>POLYX is transferred to the escrow account.</li>
-              <li>After finality, the relayer calls <code>mintFromPolymesh</code>.</li>
+              <li>
+                <code>POST /lock-intent</code> → <code>intentId</code> + memo <code>b:&lt;id&gt;</code>
+              </li>
+              <li>POLYX transfer to escrow carries that memo (32-byte safe).</li>
+              <li>Relayer parses memo, validates amount/sender, mints wPOLYX.</li>
+              <li>Status: intent_registered → locked → relaying → completed.</li>
             </ul>
           </div>
           <div className="docs-block">
@@ -1087,27 +1174,18 @@ function DocsPage(props: { onLaunch: () => void }) {
             </ul>
           </div>
           <div className="docs-block">
-            <h4>Local stack</h4>
-            <ul>
-              <li>
-                Polymesh dev node <code>ws://127.0.0.1:9944</code>
-              </li>
-              <li>
-                Anvil <code>http://127.0.0.1:8546</code> (compose profile <code>eth</code>)
-              </li>
-              <li>
-                Relayer intent API <code>http://127.0.0.1:3006</code>
-              </li>
-              <li>
-                This UI API <code>http://127.0.0.1:5174</code> · Vite <code>:5173</code>
-              </li>
-            </ul>
+            <h4>E2E</h4>
+            <p>
+              Run <code>./bridge/scripts/e2e-bridge.sh</code> (add <code>--restart</code> to kill
+              and restart the relayer after lock).
+            </p>
           </div>
           <div className="docs-block">
-            <h4>Limitations</h4>
+            <h4>Threat model (summary)</h4>
             <p>
-              Single trusted relayer. Intent matching is MVP-grade. Dev keys only. Not audited —
-              never use with real assets.
+              Single trusted relayer holds mint + escrow keys. Replay is guarded on-chain and in
+              SQLite. Intent API is local/unauthenticated — do not expose publicly. Full write-up
+              lives in <code>bridge/README.md</code>.
             </p>
           </div>
           <button type="button" className="btn btn-primary" onClick={props.onLaunch}>
@@ -1116,6 +1194,64 @@ function DocsPage(props: { onLaunch: () => void }) {
         </div>
       </section>
     </>
+  );
+}
+
+function statusToLevel(status: TransferStatus): LogLevel {
+  if (status === 'completed') return 'ok';
+  if (status === 'failed') return 'err';
+  if (status === 'relaying' || status === 'awaiting_finality' || status === 'locked') return 'wait';
+  return 'info';
+}
+
+function TransferStatusCard(props: { transfer: TransferRecord }) {
+  const t = props.transfer;
+  const steps =
+    t.direction === 'poly_to_eth'
+      ? (['intent_registered', 'locked', 'relaying', 'completed'] as TransferStatus[])
+      : (['awaiting_finality', 'relaying', 'completed'] as TransferStatus[]);
+
+  const idx = steps.indexOf(t.status === 'failed' ? 'relaying' : t.status);
+
+  return (
+    <div>
+      <div className="row" style={{ marginBottom: 10 }}>
+        <div className="row-left">
+          <span className="avatar">{t.direction === 'poly_to_eth' ? 'P' : 'E'}</span>
+          <div>
+            <div>{t.direction === 'poly_to_eth' ? 'Polymesh → Ethereum' : 'Ethereum → Polymesh'}</div>
+            <div className="row-meta mono">{t.intentId}</div>
+          </div>
+        </div>
+        <span className={`row-right ${t.status === 'failed' ? '' : ''}`}>{t.status}</span>
+      </div>
+      <div className="quick-row" style={{ marginTop: 0 }}>
+        {steps.map((s, i) => (
+          <span
+            key={s}
+            className="pill-btn"
+            style={{
+              cursor: 'default',
+              opacity: t.status === 'failed' ? (i <= Math.max(idx, 0) ? 1 : 0.4) : i <= idx ? 1 : 0.35,
+              borderColor:
+                t.status === 'failed' && s === 'relaying'
+                  ? 'var(--red)'
+                  : i <= idx
+                    ? 'rgba(96, 165, 250, 0.55)'
+                    : undefined,
+              background: i <= idx ? 'var(--blue-soft)' : 'transparent',
+            }}
+          >
+            {s}
+          </span>
+        ))}
+      </div>
+      <div className="balance-line" style={{ marginTop: 10 }}>
+        Amount {formatPolyx(t.amount)}
+        {t.relayedTxHash ? ` · relayed ${shortAddr(t.relayedTxHash, 6)}` : ''}
+        {t.error ? ` · ${t.error}` : ''}
+      </div>
+    </div>
   );
 }
 

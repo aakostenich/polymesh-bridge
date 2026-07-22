@@ -93,13 +93,17 @@ yarn dev
 Open **http://localhost:5173** — pick accounts, amounts, flip direction, bridge both ways.
 See `bridge/web/README.md` for details.
 
-### 6. Or exercise both directions via CLI
+### 6. Or exercise both directions via CLI / E2E
 
 ```bash
-# Polymesh -> Ethereum: lock POLYX (sender //Bob) to receive wPOLYX at an Eth address
-yarn lock //Bob 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 12.5
+# Polymesh -> Ethereum: lock POLYX (registers intentId, memo = b:<id>)
+yarn lock //Bob 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC 12.5
 
-# Ethereum -> Polymesh + verify balances
+# Full E2E (both directions + optional relayer restart)
+./bridge/scripts/e2e-bridge.sh
+./bridge/scripts/e2e-bridge.sh --restart
+
+# Lighter smoke (cast-driven mint/burn without full status wait)
 ./bridge/scripts/bridge-smoke-test.sh
 ```
 
@@ -119,23 +123,41 @@ forge test
 1. User calls `PolyxBridge.bridgeToPolymesh(polymeshRecipient, amount)` after
    approving the bridge to burn their wPOLYX.
 2. Contract burns wPOLYX (`WrappedPolyx.burnFrom`) and emits `BridgedToPolymesh(id, sender, polymeshRecipient, amount)`.
-3. Relayer scans events past `N` confirmations (`BRIDGE_ETH_CONFIRMATIONS`).
-4. Relayer calls `sdk.network.transferPolyx({ to: polymeshRecipient, amount })`
-   from the escrow account and marks the event id processed.
+3. Relayer records transfer status `awaiting_finality` → `relaying`.
+4. After `N` confirmations (`BRIDGE_ETH_CONFIRMATIONS`), relayer releases POLYX
+   from escrow and marks status `completed` (or `failed` on error / retry).
 
 **Binding is clean:** the Polymesh recipient comes straight from the event.
 
 ### Polymesh → Ethereum (lock POLYX → mint wPOLYX)
 
-1. User transfers POLYX to the escrow (`relayer/src/ops/lock-polyx.ts`), with
-   `memo = bridge:<ethRecipient>`.
-2. Relayer scans finalized blocks for `Balances.Transfer` events into the
-   escrow via `sdk._polkadotApi`.
-3. Relayer matches the transfer to a **pending intent** (see limitation below)
-   to learn the Ethereum recipient, waits for finality
-   (`BRIDGE_POLYMESH_FINALITY_BLOCKS`).
-4. Relayer calls `PolyxBridge.mintFromPolymesh(ethRecipient, amount, polyEventId)`.
-   The contract's `processedNonces[polyEventId]` guard prevents double-mints.
+1. Client (CLI / web) `POST /lock-intent` → relayer stores a SQLite intent and
+   returns `intentId` + memo `b:<intentId>` (fits Polymesh 32-byte memo).
+2. Client `transferPolyx` to escrow **with that memo**.
+3. Relayer scans finalized blocks for `Balances.Transfer` into escrow, parses
+   the extrinsic memo for `intentId`, validates amount/sender, sets status
+   `locked` then `relaying`.
+4. Relayer calls `mintFromPolymesh(ethRecipient, amount, polyEventId)` where
+   `polyEventId` is derived from `intentId` (stable, no block collisions).
+5. Status → `completed`. Incomplete mints are retried from SQLite after restarts.
+
+### Transfer status state machine
+
+| Status | Meaning |
+|---|---|
+| `intent_registered` | Poly→Eth intent created; lock not observed yet |
+| `locked` | Escrow transfer observed (memo matched) |
+| `awaiting_finality` | Eth→Poly burn seen; waiting confirmations |
+| `relaying` | Mint or release in flight |
+| `completed` | Destination leg finished |
+| `failed` | Terminal validation error or last relay attempt failed (retriable if not mismatch) |
+
+Query API (relayer `:3006`, also proxied at web `/api/transfers`):
+
+- `GET /health`
+- `POST /lock-intent` `{ polySender, ethRecipient, amount }`
+- `GET /transfers`
+- `GET /transfers/:intentId`
 
 ---
 
@@ -155,35 +177,62 @@ All knobs are env vars (see `bridge/relayer/.env.example`):
 | `BRIDGE_POLYMESH_ESCROW_MNEMONIC` | `//Charlie` | Escrow Polymesh key |
 | `BRIDGE_POLYMESH_FINALITY_BLOCKS` | `5` | Polymesh blocks before mint |
 | `BRIDGE_POLL_INTERVAL_MS` | `4000` | Main poll cadence |
+| `BRIDGE_INTENT_API_PORT` | `3006` | Relayer HTTP API |
 
 ---
 
-## Trust model & limitations
+## Threat model
 
-This is a **single-trusted-relayer MVP**. Be aware of:
+### Assets & actors
 
-- **Relayer authority.** The relayer address is the sole authorized minter
-  (`onlyRelayer`) and holds the escrow POLYX key. A compromised relayer could
-  mint unbacked wPOLYX or misappropriate escrow funds.
-- **Poly→Eth recipient binding (MVP).** The relayer learns the Ethereum
-  recipient from an out-of-band *pending intent*, matched by `(sender, amount)`.
-  This is fragile (same sender + same amount collides) and is intended only for
-  local demos. The production-grade path — carrying the eth recipient in a
-  settlement instruction `memo` — is stubbed: `lock-polyx.ts` already emits
-  `memo = bridge:<ethRecipient>`, and the relayer can be upgraded to parse it
-  from the extrinsic instead of relying on intents.
-- **No validator set.** No M-of-N, no light-client verification. Replay safety
-  is off-chain (SQLite) plus the on-chain `processedNonces` for mints.
-- **Dev-only escrow funding.** `bootstrap-escrow.ts` funds the escrow from
-  `//Alice`, which only exists on the `--dev` chain.
+| Asset | Who controls it |
+|---|---|
+| Escrow POLYX (Polymesh) | Relayer hot key (`BRIDGE_POLYMESH_ESCROW_MNEMONIC`) |
+| wPOLYX mint authority | Bridge contract `relayer` role (Eth key) |
+| Bridge admin (`owner`) | Deployer — can pause / set relayer |
+| User POLYX / wPOLYX | User wallets |
 
-### Hardening roadmap (out of scope here)
+### Trust assumptions (current MVP)
 
-- M-of-N relayer / validator set with on-chain threshold signatures.
-- Parse eth recipient from settlement `memo` (remove the intent-matching hack).
-- Daily transfer caps + per-transaction limits + circuit breaker (pause is wired).
-- Finality: real GRANDPA finality checks (currently a block-count heuristic).
-- External security audit before any real-asset use.
+1. **Single honest relayer.** Users trust the operator not to mint unbacked
+   wPOLYX, censor withdrawals, or drain escrow.
+2. **Correct local chain config.** RPC endpoints and contract addresses are
+   not MITM'd (local demo; production needs authenticated endpoints + pin).
+3. **Intent API authenticity.** `POST /lock-intent` is unauthenticated local
+   HTTP. Anyone who can reach it can register intents; mint still requires a
+   matching on-chain lock with the memo. Do not expose `:3006` publicly without
+   auth.
+4. **Finality heuristics.** Polymesh uses `latest - N` blocks; Ethereum uses
+   `latest - confirmations`. Not full GRANDPA/PoS finality proofs.
+5. **Dev keys.** Anvil / `//Alice` style keys are public. Never use with value.
+
+### What is protected
+
+| Risk | Mitigation |
+|---|---|
+| Double mint for same lock | On-chain `processedNonces[polyEventId]` + SQLite `processed_events` |
+| Double release for same burn | SQLite by Eth event id; burn nonce monotonic on contract |
+| Wrong Eth recipient (Poly→Eth) | Memo `b:<intentId>` → SQLite lookup (not amount matching) |
+| Amount / sender tamper vs intent | Relayer rejects mismatch → `failed` |
+| Relayer crash mid-flight | Intent + lock observation persisted; incomplete mints retried |
+
+### What is *not* protected (known residual risk)
+
+| Risk | Notes |
+|---|---|
+| Malicious / compromised relayer | Can mint freely to any address; can steal escrow POLYX |
+| Censorship | Relayer can ignore burns/locks |
+| Intent DoS | Unauthenticated intent registration can fill SQLite |
+| Chain reorg beyond heuristic | Possible incorrect skip/retry on shallow finality |
+| Smart-contract bugs | Contracts are unaudited research code |
+
+### Hardening roadmap
+
+- M-of-N relayer / threshold mint
+- Authenticated intent API + rate limits
+- Per-tx and daily volume caps (pause already wired)
+- Real GRANDPA / beacon finality checks
+- External audit before any real-asset use
 
 ---
 
@@ -222,5 +271,6 @@ bridge/
 │   └── src/                        React frontend
 └── scripts/
     ├── deploy-eth.sh
-    └── bridge-smoke-test.sh
+    ├── bridge-smoke-test.sh
+    └── e2e-bridge.sh              full E2E (+ optional --restart)
 ```

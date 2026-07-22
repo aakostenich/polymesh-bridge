@@ -62,6 +62,31 @@ export type BridgeEvent =
       txHash: string;
     };
 
+export type TransferStatus =
+  | 'intent_registered'
+  | 'locked'
+  | 'awaiting_finality'
+  | 'relaying'
+  | 'completed'
+  | 'failed';
+
+export type TransferRecord = {
+  intentId: string;
+  direction: 'eth_to_poly' | 'poly_to_eth';
+  status: TransferStatus;
+  polySender: string | null;
+  ethRecipient: string | null;
+  polymeshRecipient: string | null;
+  amount: string;
+  polyBlock: number | null;
+  ethTxHash: string | null;
+  polyTxHash: string | null;
+  relayedTxHash: string | null;
+  error: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   const data = (await res.json()) as T & { error?: string };
@@ -83,13 +108,25 @@ export const api = {
       rpcUrl: string;
     }>('/api/accounts/eth'),
   lock: (body: { senderMnemonic: string; ethRecipient: string; amount: string }) =>
-    json<{ ok: true; txHash: string; sender: string; escrow: string; amountBase: string }>(
-      '/api/lock',
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      },
-    ),
+    json<{
+      ok: true;
+      txHash: string;
+      sender: string;
+      escrow: string;
+      amountBase: string;
+      intentId: string;
+      memo: string;
+      status: string;
+    }>('/api/lock', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
   events: () => json<{ events: BridgeEvent[]; fromBlock: number; toBlock: number }>('/api/events'),
+  transfers: (limit = 50) =>
+    json<{ transfers: TransferRecord[] }>(`/api/transfers?limit=${limit}`).catch(() => ({
+      transfers: [] as TransferRecord[],
+    })),
+  transfer: (intentId: string) =>
+    json<{ transfer: TransferRecord; memo?: string }>(`/api/transfers/${intentId}`),
 };

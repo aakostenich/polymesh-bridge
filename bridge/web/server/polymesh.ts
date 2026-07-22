@@ -5,7 +5,6 @@ import { config, POLYMESH_DEV_ACCOUNTS } from './config.js';
 
 let _sdk: Polymesh | undefined;
 let _escrowAddress: string | undefined;
-/** mnemonic -> SS58 address, filled after first connect */
 const addressByMnemonic = new Map<string, string>();
 
 async function ensureConnected(): Promise<Polymesh> {
@@ -14,7 +13,6 @@ async function ensureConnected(): Promise<Polymesh> {
   const accounts: Array<{ mnemonic: string }> = POLYMESH_DEV_ACCOUNTS.map((a) => ({
     mnemonic: a.mnemonic,
   }));
-  // Always include escrow mnemonic in case it isn't one of the named dev keys.
   if (!accounts.some((a) => a.mnemonic === config.polymesh.escrowMnemonic)) {
     accounts.push({ mnemonic: config.polymesh.escrowMnemonic });
   }
@@ -26,11 +24,9 @@ async function ensureConnected(): Promise<Polymesh> {
     polkadot: { noInitWarn: true },
   });
 
-  // setSigningManager configures SS58 format on the manager — required before getAccounts().
   await sdk.setSigningManager(manager);
   const resolved = await manager.getAccounts();
 
-  // Map mnemonics to addresses in the same order we registered them.
   for (let i = 0; i < accounts.length; i++) {
     if (resolved[i]) addressByMnemonic.set(accounts[i].mnemonic, resolved[i]);
   }
@@ -59,7 +55,6 @@ export async function getPolyxBalance(address: string): Promise<string> {
   const sdk = await ensureConnected();
   const account = await sdk.accountManagement.getAccount({ address });
   const balance = await account.getBalance();
-  // free is in 6-decimal base units
   return balance.free.toFixed(0);
 }
 
@@ -90,15 +85,19 @@ export async function listDevAccounts(): Promise<
   return out;
 }
 
-/**
- * Lock POLYX into escrow for bridging to Ethereum.
- * Mirrors bridge/relayer/src/ops/lock-polyx.ts.
- */
 export async function lockPolyx(params: {
   senderMnemonic: string;
   ethRecipient: string;
   amountHuman: string;
-}): Promise<{ txHash: string; sender: string; escrow: string; amountBase: string }> {
+}): Promise<{
+  txHash: string;
+  sender: string;
+  escrow: string;
+  amountBase: string;
+  intentId: string;
+  memo: string;
+  status: string;
+}> {
   const { senderMnemonic, ethRecipient, amountHuman } = params;
 
   if (!ethRecipient.startsWith('0x') || ethRecipient.length !== 42) {
@@ -110,7 +109,6 @@ export async function lockPolyx(params: {
     throw new Error(`Invalid amount: ${amountHuman}`);
   }
 
-  // Dedicated connection for the sender so we don't thrash the shared escrow signer.
   const senderManager = await LocalSigningManager.create({
     accounts: [{ mnemonic: senderMnemonic }],
   });
@@ -128,7 +126,6 @@ export async function lockPolyx(params: {
 
     const escrow = await getEscrowAddress();
 
-    // Register intent with the running relayer so it can mint to ethRecipient.
     const intentUrl = `${config.intentApiUrl}/lock-intent`;
     const intentResp = await fetch(intentUrl, {
       method: 'POST',
@@ -145,10 +142,16 @@ export async function lockPolyx(params: {
         `Relayer intent API failed (${intentResp.status}): ${text}. Is the relayer running on ${config.intentApiUrl}?`,
       );
     }
+    const intentJson = (await intentResp.json()) as {
+      intentId: string;
+      memo: string;
+      status: string;
+    };
 
     const tx = await sdk.network.transferPolyx({
       to: escrow,
       amount: amountBase,
+      memo: intentJson.memo,
     });
     await tx.run();
     if (!tx.isSuccess) {
@@ -160,6 +163,9 @@ export async function lockPolyx(params: {
       sender,
       escrow,
       amountBase: amountBase.toFixed(0),
+      intentId: intentJson.intentId,
+      memo: intentJson.memo,
+      status: intentJson.status,
     };
   } finally {
     await sdk.disconnect();

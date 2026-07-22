@@ -1,8 +1,21 @@
 import { BigNumber } from '@polymeshassociation/polymesh-sdk';
-import { createServer } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 import { config } from './config.js';
-import { closeDb, getCursor, isProcessed, markProcessed, setCursor } from './db.js';
+import {
+  closeDb,
+  createEthToPolyTransfer,
+  createPolyToEthIntent,
+  getCursor,
+  getTransfer,
+  intentIdToPolyEventId,
+  isProcessed,
+  listTransfers,
+  markProcessed,
+  memoForIntent,
+  setCursor,
+  updateTransfer,
+} from './db.js';
 import {
   getBridgedToPolymeshEvents,
   getBridgeContract,
@@ -21,36 +34,48 @@ import {
 } from './polymesh.js';
 
 /**
- * Main relayer loop.
+ * Main relayer loop + HTTP status/intent API.
  *
- * Two independent watchers run on a shared poll cadence:
- *
- *  1. Eth -> Polymesh: scan `BridgedToPolymesh` events (user burned wPOLYX),
- *     wait for confirmations, then release POLYX from escrow on Polymesh.
- *
- *  2. Polymesh -> Eth: scan finalized blocks for transfers into the escrow
- *     (user locked POLYX), wait for finality, then mint wPOLYX on Ethereum.
- *
- * Replay safety: each action is checked against the SQLite store before
- * running and marked after. The mint direction additionally relies on the
- * contract's on-chain `processedNonces` guard.
- *
- * Trust model (MVP): the relayer is the single trusted authority for the mint
- * direction and holds the escrow key. See bridge/README.md.
+ * Poly→Eth binding uses a short intent id in the Polymesh transfer memo
+ * (`b:<intentId>`), stored in SQLite so restarts resume correctly.
  */
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function log(scope: string, msg: string): void {
-  // ISO timestamp + scope tag for greppable logs.
   console.log(`[${new Date().toISOString()}] [${scope}] ${msg}`);
+}
+
+function readBody(req: IncomingMessage, limit = 8192): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk: Buffer) => {
+      body += chunk;
+      if (body.length > limit) {
+        req.destroy();
+        reject(new Error('body too large'));
+      }
+    });
+    req.on('end', () => resolve(body));
+    req.on('error', reject);
+  });
+}
+
+function json(res: ServerResponse, status: number, payload: unknown): void {
+  res.writeHead(status, {
+    'content-type': 'application/json',
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET,POST,OPTIONS',
+    'access-control-allow-headers': 'content-type',
+  });
+  res.end(JSON.stringify(payload));
 }
 
 async function processEthToPolymesh(): Promise<void> {
   const latest = await getLatestBlock();
   const confirmations = config.eth.confirmations;
   const safeBlock = latest - confirmations;
-  if (safeBlock < 0) return; // chain not deep enough yet
+  if (safeBlock < 0) return;
 
   const fromBlock = getCursor('eth_to_poly') + 1;
   if (fromBlock > safeBlock) return;
@@ -58,13 +83,30 @@ async function processEthToPolymesh(): Promise<void> {
   const events = await getBridgedToPolymeshEvents(fromBlock, safeBlock);
   for (const ev of events) {
     const eventId = String(ev.id);
+    const intentId = `eth-${eventId}`;
+
     if (isProcessed('eth_to_poly', eventId)) {
       log('ETH→POLY', `event id=${eventId} already relayed, skipping`);
       continue;
     }
 
+    // Track transfer status (create if first time we see this burn).
+    if (!getTransfer(intentId)) {
+      createEthToPolyTransfer({
+        intentId,
+        ethSender: ev.sender,
+        polymeshRecipient: ev.polymeshRecipient,
+        amount: ev.amount.toString(),
+        ethTxHash: ev.txHash,
+        status: 'awaiting_finality',
+      });
+    } else {
+      updateTransfer(intentId, { status: 'awaiting_finality', ethTxHash: ev.txHash });
+    }
+
     const amount = new BigNumber(ev.amount.toString());
     log('ETH→POLY', `event id=${eventId}: releasing ${ev.amount} to ${ev.polymeshRecipient}`);
+    updateTransfer(intentId, { status: 'relaying' });
 
     try {
       const hash = await releasePolyx(ev.polymeshRecipient, amount);
@@ -74,103 +116,82 @@ async function processEthToPolymesh(): Promise<void> {
         txHash: ev.txHash,
         relayedTxHash: hash,
       });
+      updateTransfer(intentId, {
+        status: 'completed',
+        relayedTxHash: hash,
+        polyTxHash: hash,
+        error: null,
+      });
       log('ETH→POLY', `event id=${eventId} relayed: ${hash}`);
     } catch (err) {
-      // Leave unmarked so the next poll retries. Transient failures (e.g. escrow
-      // temporarily underfunded, node hiccup) are expected to resolve.
-      log('ETH→POLY', `event id=${eventId} FAILED: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      updateTransfer(intentId, { status: 'failed', error: message });
+      log('ETH→POLY', `event id=${eventId} FAILED: ${message}`);
     }
   }
 
   setCursor('eth_to_poly', safeBlock);
 }
 
-interface PendingIntent {
-  /** Polymesh sender address (must match the transfer's `from`). */
-  polySender: string;
-  /** Ethereum address to receive minted wPOLYX. */
-  ethRecipient: string;
-  /** Expected lock amount in base units. */
-  amount: string;
-  /** Timestamp the intent was registered. */
-  createdAt: number;
-}
-
-/**
- * MVP binding for Poly->Eth: a pending intent provided out-of-band (see
- * lock-polyx.ts) is matched to an incoming escrow transfer by
- * (sender, amount). A real bridge would carry the eth recipient on-chain
- * (e.g. via a settlement `memo`); see README limitations.
- *
- * This in-memory map is populated by a tiny HTTP endpoint in lock-polyx.ts when
- * run in `--register` mode against a running relayer. For the standalone
- * smoke test we also accept intents via an env-provided list at startup.
- */
-const pendingIntents: PendingIntent[] = new Array();
-
-export function registerIntent(intent: PendingIntent): void {
-  pendingIntents.push(intent);
-  log('POLY→ETH', `intent registered: ${intent.amount} from ${intent.polySender} -> ${intent.ethRecipient}`);
-}
-
-function consumeIntent(sender: string, amount: string): PendingIntent | undefined {
-  const idx = pendingIntents.findIndex((i) => i.polySender === sender && i.amount === amount);
-  if (idx === -1) return undefined;
-  const [intent] = pendingIntents.splice(idx, 1);
-  return intent;
-}
-
 let polyScanBlock = 0;
 
-/**
- * Tiny HTTP API so `lock-polyx.ts` can register a pending intent with a running
- * relayer: POST /lock-intent { polySender, ethRecipient, amount }.
- *
- * This binds an incoming POLYX transfer to the Ethereum address that should
- * receive the minted wPOLYX. Without it the relayer cannot know the eth
- * recipient (MVP limitation — see README). Returns 201 on success, 400 on bad
- * input.
- */
-function startIntentApi(): void {
-  const server = createServer((req, res) => {
-    if (req.method === 'POST' && req.url === '/lock-intent') {
-      let body = '';
-      req.on('data', (chunk) => {
-        body += chunk;
-        if (body.length > 4096) req.destroy(); // guard against huge payloads
-      });
-      req.on('end', () => {
-        try {
-          const parsed = JSON.parse(body) as Partial<PendingIntent>;
-          if (!parsed.polySender || !parsed.ethRecipient || !parsed.amount) {
-            res.writeHead(400, { 'content-type': 'application/json' });
-            res.end(JSON.stringify({ error: 'missing polySender/ethRecipient/amount' }));
-            return;
-          }
-          registerIntent({
-            polySender: parsed.polySender,
-            ethRecipient: parsed.ethRecipient,
-            amount: parsed.amount,
-            createdAt: Date.now(),
-          });
-          res.writeHead(201, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ ok: true }));
-        } catch (err) {
-          res.writeHead(400, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ error: (err as Error).message }));
-        }
-      });
-      return;
-    }
-    res.writeHead(404, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: 'not found' }));
-  });
+/** Mint for a lock that is already recorded in SQLite (restart-safe). */
+async function mintForIntent(intentId: string): Promise<void> {
+  const intent = getTransfer(intentId);
+  if (!intent || intent.direction !== 'poly_to_eth') return;
+  if (intent.status === 'completed') return;
 
-  server.listen(config.intentApiPort, () => {
-    log('RELAYER', `intent API listening on :${config.intentApiPort} (POST /lock-intent)`);
-  });
+  const eventId = `intent:${intentId}`;
+  if (isProcessed('poly_to_eth', eventId)) {
+    updateTransfer(intentId, { status: 'completed' });
+    return;
+  }
+
+  if (!intent.ethRecipient) {
+    updateTransfer(intentId, { status: 'failed', error: 'missing ethRecipient on intent' });
+    return;
+  }
+
+  updateTransfer(intentId, { status: 'relaying', error: null });
+  log(
+    'POLY→ETH',
+    `minting ${intent.amount} wPOLYX to ${intent.ethRecipient} (intent=${intentId}, block=${intent.polyBlock})`,
+  );
+
+  try {
+    const polyEventId = intentIdToPolyEventId(intentId);
+    const hash = await mintFromPolymesh(intent.ethRecipient, BigInt(intent.amount), polyEventId);
+    markProcessed({
+      direction: 'poly_to_eth',
+      eventId,
+      relayedTxHash: hash,
+    });
+    updateTransfer(intentId, {
+      status: 'completed',
+      relayedTxHash: hash,
+      ethTxHash: hash,
+      error: null,
+    });
+    log('POLY→ETH', `intent ${intentId} minted: ${hash}`);
+  } catch (err) {
+    const message = (err as Error).message;
+    updateTransfer(intentId, { status: 'failed', error: message });
+    log('POLY→ETH', `intent ${intentId} mint FAILED: ${message}`);
+  }
 }
 
+/** Retry locks that were observed but not completed (relayer crash / RPC blip). */
+async function retryIncompletePolyToEth(): Promise<void> {
+  for (const t of listTransfers(100)) {
+    if (t.direction !== 'poly_to_eth') continue;
+    if (t.polyBlock === null) continue;
+    if (t.status === 'completed') continue;
+    if (t.status === 'intent_registered') continue;
+    // amount/sender failures are terminal
+    if (t.error?.includes('mismatch')) continue;
+    await mintForIntent(t.intentId);
+  }
+}
 
 async function processPolymeshToEth(): Promise<void> {
   const sdk = await getPolymesh();
@@ -181,72 +202,201 @@ async function processPolymeshToEth(): Promise<void> {
   const safeBlock = Math.max(finalizedNum - finalityBlocks, 0);
 
   if (polyScanBlock === 0) {
-    // First run: resume just below the safe block so we don't replay history.
     polyScanBlock = Math.max(getCursor('poly_to_eth'), 0);
   }
-  const fromBlock = polyScanBlock + 1;
+  let fromBlock = polyScanBlock + 1;
+
+  // Always retry incomplete mints first (covers restarts after cursor advanced).
+  await retryIncompletePolyToEth();
+
+  // If intents are still waiting for a lock observation, rescan a recent window
+  // so a prior skip (e.g. memo decode bug) or cursor race cannot strand them.
+  const pendingLocks = listTransfers(50).filter(
+    (t) => t.direction === 'poly_to_eth' && t.status === 'intent_registered',
+  );
+  if (pendingLocks.length > 0) {
+    const rescanFrom = Math.max(0, safeBlock - 64);
+    if (fromBlock > rescanFrom) fromBlock = rescanFrom;
+  }
+
   if (fromBlock > safeBlock) return;
 
   const transfers = await getIncomingTransfers(escrow, fromBlock, safeBlock);
   for (const t of transfers) {
-    const eventId = `${t.blockNumber}:${t.from}:${t.amount}`;
-    if (isProcessed('poly_to_eth', eventId)) {
+    const intentId = t.intentId;
+    if (!intentId) {
+      log(
+        'POLY→ETH',
+        `transfer block=${t.blockNumber} from=${t.from} amount=${t.amount}: no intent id in memo, skipping`,
+      );
       continue;
     }
 
-    const intent = consumeIntent(t.from, t.amount);
-    if (!intent) {
-      log('POLY→ETH', `transfer at block ${t.blockNumber} from ${t.from} of ${t.amount}: no matching intent, leaving for later`);
-      // Re-add to the front so a later intent registration can pick it up.
-      // NOTE: for the MVP this means an unmatched early transfer must be
-      // registered before the relayer scans its block. See README.
+    const intent = getTransfer(intentId);
+    if (!intent || intent.direction !== 'poly_to_eth') {
+      log('POLY→ETH', `intent ${intentId} not registered (transfer at block ${t.blockNumber})`);
       continue;
     }
 
-    log('POLY→ETH', `minting ${t.amount} wPOLYX to ${intent.ethRecipient} (lock at block ${t.blockNumber})`);
-    try {
-      // Use blockNumber as the on-chain replay key for the mint.
-      const polyEventId = BigInt(t.blockNumber);
-      const hash = await mintFromPolymesh(intent.ethRecipient, BigInt(t.amount), polyEventId);
-      markProcessed({
-        direction: 'poly_to_eth',
-        eventId,
-        relayedTxHash: hash,
+    if (intent.status === 'completed' || isProcessed('poly_to_eth', `intent:${intentId}`)) {
+      updateTransfer(intentId, { status: 'completed' });
+      continue;
+    }
+
+    if (intent.amount !== t.amount) {
+      const msg = `amount mismatch: intent=${intent.amount} transfer=${t.amount}`;
+      updateTransfer(intentId, {
+        status: 'failed',
+        error: msg,
+        polyBlock: t.blockNumber,
+        polyTxHash: t.extrinsicHash,
       });
-      log('POLY→ETH', `minted: ${hash}`);
-    } catch (err) {
-      log('POLY→ETH', `mint FAILED: ${(err as Error).message}`);
+      log('POLY→ETH', `intent ${intentId}: ${msg}`);
+      continue;
     }
+
+    if (intent.polySender && intent.polySender !== t.from) {
+      const msg = `sender mismatch: intent=${intent.polySender} transfer=${t.from}`;
+      updateTransfer(intentId, {
+        status: 'failed',
+        error: msg,
+        polyBlock: t.blockNumber,
+      });
+      log('POLY→ETH', `intent ${intentId}: ${msg}`);
+      continue;
+    }
+
+    // Persist observation BEFORE mint so a crash still resumes from SQLite.
+    updateTransfer(intentId, {
+      status: 'locked',
+      polyBlock: t.blockNumber,
+      polyTxHash: t.extrinsicHash,
+      polySender: t.from,
+    });
+
+    await mintForIntent(intentId);
   }
 
   polyScanBlock = safeBlock;
   setCursor('poly_to_eth', safeBlock);
 }
 
+/**
+ * HTTP API:
+ *   GET  /health
+ *   POST /lock-intent  { polySender, ethRecipient, amount } → { intentId, memo, status }
+ *   GET  /transfers
+ *   GET  /transfers/:intentId
+ */
+function startApi(): void {
+  const server = createServer((req, res) => {
+    void (async () => {
+      try {
+        if (req.method === 'OPTIONS') {
+          json(res, 204, {});
+          return;
+        }
+
+        const url = new URL(req.url ?? '/', `http://127.0.0.1:${config.intentApiPort}`);
+
+        if (req.method === 'GET' && url.pathname === '/health') {
+          json(res, 200, { ok: true });
+          return;
+        }
+
+        if (req.method === 'GET' && url.pathname === '/transfers') {
+          const limit = Number(url.searchParams.get('limit') ?? '50');
+          json(res, 200, { transfers: listTransfers(Number.isFinite(limit) ? limit : 50) });
+          return;
+        }
+
+        if (req.method === 'GET' && url.pathname.startsWith('/transfers/')) {
+          const intentId = url.pathname.slice('/transfers/'.length);
+          const t = getTransfer(intentId);
+          if (!t) {
+            json(res, 404, { error: 'not found' });
+            return;
+          }
+          json(res, 200, { transfer: t, memo: memoForIntent(t.intentId) });
+          return;
+        }
+
+        if (req.method === 'POST' && url.pathname === '/lock-intent') {
+          const body = await readBody(req);
+          const parsed = JSON.parse(body) as {
+            polySender?: string;
+            ethRecipient?: string;
+            amount?: string;
+          };
+          if (!parsed.polySender || !parsed.ethRecipient || !parsed.amount) {
+            json(res, 400, { error: 'missing polySender/ethRecipient/amount' });
+            return;
+          }
+          if (!parsed.ethRecipient.startsWith('0x') || parsed.ethRecipient.length !== 42) {
+            json(res, 400, { error: 'invalid ethRecipient' });
+            return;
+          }
+
+          const intent = createPolyToEthIntent({
+            polySender: parsed.polySender,
+            ethRecipient: parsed.ethRecipient,
+            amount: parsed.amount,
+          });
+          const memo = memoForIntent(intent.intentId);
+          log(
+            'POLY→ETH',
+            `intent registered id=${intent.intentId} amount=${intent.amount} ${intent.polySender} -> ${intent.ethRecipient}`,
+          );
+          json(res, 201, {
+            ok: true,
+            intentId: intent.intentId,
+            memo,
+            status: intent.status,
+            transfer: intent,
+          });
+          return;
+        }
+
+        json(res, 404, { error: 'not found' });
+      } catch (err) {
+        json(res, 400, { error: (err as Error).message });
+      }
+    })();
+  });
+
+  server.listen(config.intentApiPort, () => {
+    log(
+      'RELAYER',
+      `API on :${config.intentApiPort}  POST /lock-intent  GET /transfers  GET /health`,
+    );
+  });
+}
+
 async function main(): Promise<void> {
   log('RELAYER', 'starting');
-  const sdk = await getPolymesh();
   const escrow = await getEscrowAddress();
   const balance = await getEscrowBalance();
-  log('RELAYER', `connected to Polymesh; escrow=${escrow} balance=${balance.dividedBy(10 ** 6).toFixed(6)} POLYX`);
+  log(
+    'RELAYER',
+    `connected to Polymesh; escrow=${escrow} balance=${balance.dividedBy(10 ** 6).toFixed(6)} POLYX`,
+  );
   log('RELAYER', `Ethereum RPC=${config.eth.rpcUrl} bridge=${config.eth.bridgeAddress}`);
 
-  // Sanity: verify the relayer key matches the on-chain relayer role.
   const bridge = getBridgeContract();
   const onChainRelayer: string = await bridge.relayer();
   const walletAddr = getRelayerWallet().address;
   if (walletAddr.toLowerCase() !== onChainRelayer.toLowerCase()) {
-    log('RELAYER', `WARNING: relayer wallet ${walletAddr} != on-chain relayer ${onChainRelayer}. Minting will fail.`);
+    log(
+      'RELAYER',
+      `WARNING: relayer wallet ${walletAddr} != on-chain relayer ${onChainRelayer}. Minting will fail.`,
+    );
   }
 
-  // Best-effort: drive a Polymesh finalized-block tick so Poly->Eth keeps moving
-  // even if the poll interval is long. Errors here are non-fatal.
   onFinalizedBlock(() => {
     void processPolymeshToEth().catch((e) => log('POLY→ETH', `tick error: ${(e as Error).message}`));
   }).catch((e) => log('RELAYER', `block subscription error: ${(e as Error).message}`));
 
-  // HTTP API for Poly->Eth intent registration (used by lock-polyx.ts).
-  startIntentApi();
+  startApi();
 
   log('RELAYER', `polling every ${config.pollIntervalMs}ms`);
   // eslint-disable-next-line no-constant-condition
