@@ -245,6 +245,47 @@ services:
       - --rpc-cors=all
       - --allow-unprotected-txs
 
+  # Standalone local Ethereum node (Anvil) for the POLYX <-> wPOLYX bridge.
+  # Separate from `polymesh-eth-rpc` (which is Polymesh's own EVM layer):
+  # this is an independent chain that the bridge contracts live on.
+  # Host port 8546 avoids the 8545 collision with polymesh-eth-rpc.
+  eth-anvil:
+    image: ${BRIDGE_ETH_ANVIL_IMAGE:-ghcr.io/foundry-rs/foundry:latest}
+    profiles:
+      - eth
+    networks:
+      - polymesh
+    ports:
+      - ${BRIDGE_ETH_RPC_PORT:-8546}:8545
+    restart: unless-stopped
+    # Override the image ENTRYPOINT (`/bin/sh -c`), which would mangle the
+    # `--host 0.0.0.0` flag into a single shell word and bind Anvil to
+    # 127.0.0.1 inside the container (unreachable from the host).
+    entrypoint: ['anvil']
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - '8545'
+      - --chain-id
+      - ${BRIDGE_ETH_CHAIN_ID:-1337}
+      - --accounts
+      - '10'
+      - --balance
+      - '10000'
+      - --mnemonic
+      - ${BRIDGE_ANVIL_MNEMONIC:-test test test test test test test test test test test junk}
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'cast chain-id --rpc-url http://127.0.0.1:8545 > /dev/null 2>&1 || exit 1',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   blockscout-db:
     image: ${POLYMESH_BLOCKSCOUT_POSTGRES_IMAGE:-postgres:17}
     profiles:

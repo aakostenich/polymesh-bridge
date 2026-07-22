@@ -52,3 +52,11 @@ POLYMESH_SUBQUERY_GRAPHQL_PORT=3000
 
 # Optional vault image override
 # VAULT_VERSION=latest
+
+# POLYX <-> wPOLYX bridge (used with --profile eth)
+# Standalone local Ethereum node (Anvil). Separate from Polymesh's own EVM layer.
+# Host port 8546 avoids collision with polymesh-eth-rpc (8545).
+# BRIDGE_ETH_ANVIL_IMAGE=ghcr.io/foundry-rs/foundry:latest
+# BRIDGE_ETH_RPC_PORT=8546
+# BRIDGE_ETH_CHAIN_ID=1337
+# BRIDGE_ANVIL_MNEMONIC=test test test test test test test test test test test junk

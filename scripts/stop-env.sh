@@ -35,12 +35,17 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
-# Always tear down with the `evm` profile enabled so profile-gated services
-# (eth-rpc, Blockscout, ...) are removed even when the caller omits --profile.
-# Without this, `down` leaves those containers running.
+# Always tear down with the `evm` and `eth` profiles enabled so profile-gated
+# services (eth-rpc, Blockscout, the bridge's standalone Anvil node, ...) are
+# removed even when the caller omits --profile. Without this, `down` leaves
+# those containers running.
 case ",$COMPOSE_PROFILES," in
 	*,evm,*) ;;
 	*) COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}evm" ;;
+esac
+case ",$COMPOSE_PROFILES," in
+	*,eth,*) ;;
+	*) COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}eth" ;;
 esac
 
 if [[ "${COMPOSE_ENV}" != /* ]]; then
