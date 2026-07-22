@@ -124,10 +124,13 @@ app.get('/api/status', async (_req, res) => {
     const relayer = await probeRelayer();
 
     res.json({
+      network: config.network,
       eth: {
         ok: ethOk,
         rpcUrl: config.eth.rpcUrl,
         chainId: config.eth.chainId,
+        chainName: config.eth.chainName,
+        explorerUrl: config.eth.explorerUrl,
         block: ethBlock,
         bridgeAddress: config.eth.bridgeAddress,
         wPolyxAddress: config.eth.wPolyxAddress,
@@ -140,6 +143,7 @@ app.get('/api/status', async (_req, res) => {
       polymesh: {
         ok: polyOk,
         nodeUrl: config.polymesh.nodeUrl,
+        portalUrl: config.polymesh.portalUrl,
         escrow,
         escrowBalance,
         error: polyError,

@@ -20,10 +20,13 @@ Clickable demo UI for the POLYX ↔ wPOLYX bridge. Uses:
 ```bash
 cd bridge/web
 yarn install
-yarn dev
+yarn dev                 # local Anvil / compose
+yarn dev:testnet         # Sepolia + Polymesh testnet (needs relayer .env.testnet)
 ```
 
 Open **http://localhost:5173**
+
+Testnet faucets + deploy: see **[../TESTNET.md](../TESTNET.md)**.
 
 | Process | Port |
 |---|---|

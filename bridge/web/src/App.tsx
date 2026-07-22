@@ -228,6 +228,8 @@ export function App() {
     ? {
         rpcUrl: status.eth.rpcUrl,
         chainId: status.eth.chainId,
+        chainName: status.eth.chainName,
+        explorerUrl: status.eth.explorerUrl,
         bridgeAddress: status.eth.bridgeAddress,
         wPolyxAddress: status.eth.wPolyxAddress,
       }

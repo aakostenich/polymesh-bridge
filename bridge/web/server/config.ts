@@ -4,11 +4,27 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const relayerEnv = resolve(here, '../../relayer/.env');
-const localEnv = resolve(here, '../.env');
+const network = (process.env.BRIDGE_NETWORK ?? 'local').toLowerCase();
+const isTestnet = network === 'testnet' || network === 'sepolia';
 
-if (existsSync(relayerEnv)) loadDotenv({ path: relayerEnv });
-if (existsSync(localEnv)) loadDotenv({ path: localEnv, override: true });
+// Load profile envs (first match), then allow local overrides.
+const candidates = [
+  process.env.BRIDGE_ENV_FILE ? resolve(process.cwd(), process.env.BRIDGE_ENV_FILE) : '',
+  isTestnet ? resolve(here, '../../relayer/.env.testnet') : '',
+  isTestnet ? resolve(here, '../../envs/testnet.env') : '',
+  resolve(here, '../../relayer/.env'),
+  resolve(here, '../../envs/local.env'),
+  resolve(here, '../.env'),
+].filter(Boolean);
+
+for (const p of candidates) {
+  if (existsSync(p)) loadDotenv({ path: p, override: false });
+}
+// Prefer explicit testnet file when requested
+if (isTestnet) {
+  const t = resolve(here, '../../relayer/.env.testnet');
+  if (existsSync(t)) loadDotenv({ path: t, override: true });
+}
 
 function required(name: string, fallback?: string): string {
   const value = process.env[name] ?? fallback;
@@ -26,18 +42,40 @@ function int(name: string, fallback: number): number {
   return n;
 }
 
+const isTestnetCfg =
+  (process.env.BRIDGE_NETWORK ?? 'local').toLowerCase() === 'testnet' ||
+  (process.env.BRIDGE_NETWORK ?? '').toLowerCase() === 'sepolia';
+
 export const config = {
+  network: isTestnetCfg ? 'testnet' : 'local',
   port: int('BRIDGE_WEB_API_PORT', 5174),
   eth: {
-    rpcUrl: required('BRIDGE_ETH_RPC_URL', 'http://127.0.0.1:8546'),
-    chainId: int('BRIDGE_ETH_CHAIN_ID', 1337),
+    rpcUrl: required(
+      'BRIDGE_ETH_RPC_URL',
+      isTestnetCfg
+        ? 'https://ethereum-sepolia-rpc.publicnode.com'
+        : 'http://127.0.0.1:8546',
+    ),
+    chainId: int('BRIDGE_ETH_CHAIN_ID', isTestnetCfg ? 11155111 : 1337),
+    chainName: isTestnetCfg ? 'Sepolia' : 'Anvil Local (POLYX Bridge)',
+    explorerUrl: isTestnetCfg ? 'https://sepolia.etherscan.io' : null as string | null,
     bridgeAddress: required('BRIDGE_ADDRESS'),
     wPolyxAddress: required('WPOLYX_ADDRESS'),
   },
   polymesh: {
-    nodeUrl: required('POLYMESH_NODE_URL', 'ws://127.0.0.1:9944'),
-    middlewareUrl: required('POLYMESH_GRAPHQL_URL', 'http://127.0.0.1:3000'),
-    escrowMnemonic: required('BRIDGE_POLYMESH_ESCROW_MNEMONIC', '//Charlie'),
+    nodeUrl: required(
+      'POLYMESH_NODE_URL',
+      isTestnetCfg ? 'wss://testnet-rpc.polymesh.live/' : 'ws://127.0.0.1:9944',
+    ),
+    middlewareUrl: required(
+      'POLYMESH_GRAPHQL_URL',
+      isTestnetCfg ? 'https://testnet-graphql.polymesh.live/' : 'http://127.0.0.1:3000',
+    ),
+    portalUrl: isTestnetCfg ? 'https://portal.polymesh.live/' : null as string | null,
+    escrowMnemonic: required(
+      'BRIDGE_POLYMESH_ESCROW_MNEMONIC',
+      isTestnetCfg ? undefined : '//Charlie',
+    ),
   },
   intentApiUrl: process.env.BRIDGE_INTENT_API_URL ?? 'http://127.0.0.1:3006',
   /**
@@ -46,7 +84,7 @@ export const config = {
    */
   apiToken: (() => {
     const raw = process.env.BRIDGE_API_TOKEN;
-    if (raw === undefined) return 'dev-bridge-token';
+    if (raw === undefined) return isTestnetCfg ? null : 'dev-bridge-token';
     const t = raw.trim();
     if (t === '' || t.toLowerCase() === 'off' || t.toLowerCase() === 'none') return null;
     return t;

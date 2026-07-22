@@ -1,8 +1,11 @@
 export type StatusResponse = {
+  network?: string;
   eth: {
     ok: boolean;
     rpcUrl: string;
     chainId: number;
+    chainName?: string;
+    explorerUrl?: string | null;
     block: number;
     bridgeAddress: string;
     wPolyxAddress: string;
@@ -15,6 +18,7 @@ export type StatusResponse = {
   polymesh: {
     ok: boolean;
     nodeUrl: string;
+    portalUrl?: string | null;
     escrow: string;
     escrowBalance: string;
     error?: string;

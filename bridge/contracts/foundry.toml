@@ -6,3 +6,10 @@ solc = "0.8.24"
 
 # Allow `forge test -vvv` to show traces; default verbosity is fine here.
 verbosity = 2
+
+[rpc_endpoints]
+local = "http://127.0.0.1:8546"
+sepolia = "${BRIDGE_ETH_RPC_URL}"
+
+[etherscan]
+sepolia = { key = "${ETHERSCAN_API_KEY}" }

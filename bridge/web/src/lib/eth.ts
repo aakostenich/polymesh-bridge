@@ -25,6 +25,8 @@ export type EthConfig = {
   chainId: number;
   bridgeAddress: string;
   wPolyxAddress: string;
+  chainName?: string;
+  explorerUrl?: string | null;
 };
 
 export function formatPolyx(baseUnits: string | bigint, digits = 6): string {
@@ -63,12 +65,15 @@ export function signerFromPrivateKey(privateKey: string, rpcUrl: string, chainId
 }
 
 /**
- * Ensure MetaMask is on the bridge's local Anvil chain (default 1337 / 0x539).
+ * Ensure MetaMask is on the bridge chain (Anvil local or Sepolia).
  * Adds the network if missing.
  */
-export async function ensureAnvilNetwork(cfg: EthConfig): Promise<void> {
+export async function ensureBridgeNetwork(cfg: EthConfig): Promise<void> {
   const eth = getEthereum();
   const chainIdHex = `0x${cfg.chainId.toString(16)}`;
+  const chainName =
+    cfg.chainName ??
+    (cfg.chainId === 11155111 ? 'Sepolia' : cfg.chainId === 1337 ? 'Anvil Local (POLYX Bridge)' : `Chain ${cfg.chainId}`);
   try {
     await eth.request({
       method: 'wallet_switchEthereumChain',
@@ -78,16 +83,18 @@ export async function ensureAnvilNetwork(cfg: EthConfig): Promise<void> {
     const code = (err as { code?: number }).code;
     // 4902 = chain not added
     if (code === 4902 || code === -32603) {
+      const params: Record<string, unknown> = {
+        chainId: chainIdHex,
+        chainName,
+        nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+        rpcUrls: [cfg.rpcUrl],
+      };
+      if (cfg.explorerUrl) {
+        params.blockExplorerUrls = [cfg.explorerUrl];
+      }
       await eth.request({
         method: 'wallet_addEthereumChain',
-        params: [
-          {
-            chainId: chainIdHex,
-            chainName: 'Anvil Local (POLYX Bridge)',
-            nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-            rpcUrls: [cfg.rpcUrl],
-          },
-        ],
+        params: [params],
       });
       return;
     }
@@ -95,14 +102,19 @@ export async function ensureAnvilNetwork(cfg: EthConfig): Promise<void> {
   }
 }
 
-/** Connect MetaMask, switch to Anvil, return signer + address. */
+/** @deprecated use ensureBridgeNetwork */
+export async function ensureAnvilNetwork(cfg: EthConfig): Promise<void> {
+  return ensureBridgeNetwork(cfg);
+}
+
+/** Connect MetaMask, switch to bridge network, return signer + address. */
 export async function connectMetaMask(
   cfg: EthConfig,
 ): Promise<{ signer: Signer; address: string; provider: BrowserProvider }> {
   const eth = getEthereum();
   const provider = new BrowserProvider(eth);
   await provider.send('eth_requestAccounts', []);
-  await ensureAnvilNetwork(cfg);
+  await ensureBridgeNetwork(cfg);
   // Re-create after chain switch so network is correct.
   const provider2 = new BrowserProvider(eth);
   const signer = await provider2.getSigner();

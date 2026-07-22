@@ -7,6 +7,8 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,ui -c cyan,magenta \"npm run dev:api\" \"npm run dev:ui\"",
+    "dev:local": "BRIDGE_NETWORK=local concurrently -k -n api,ui -c cyan,magenta \"npm run dev:api\" \"npm run dev:ui\"",
+    "dev:testnet": "BRIDGE_NETWORK=testnet concurrently -k -n api,ui -c cyan,magenta \"npm run dev:api\" \"npm run dev:ui\"",
     "dev:api": "tsx watch server/index.ts",
     "dev:ui": "vite",
     "build": "tsc -p tsconfig.json --noEmit && vite build",

@@ -15,6 +15,11 @@ web/dist/
 # Local environment / secrets
 .env
 .env.local
+.env.testnet
+.env.*.local
+!**/.env.example
+!**/.env.testnet.example
+!**/envs/*.env
 
 # Relayer local state (SQLite db of processed events)
 *.db

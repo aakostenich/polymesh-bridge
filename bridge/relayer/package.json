@@ -8,6 +8,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "tsx src/relayer.ts",
+    "start:local": "BRIDGE_NETWORK=local tsx src/relayer.ts",
+    "start:testnet": "BRIDGE_NETWORK=testnet tsx src/relayer.ts",
     "bootstrap": "tsx src/ops/bootstrap-escrow.ts",
     "lock": "tsx src/ops/lock-polyx.ts",
     "e2e": "../scripts/e2e-bridge.sh",

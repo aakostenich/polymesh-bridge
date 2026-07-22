@@ -1,11 +1,12 @@
 # POLYX ↔ wPOLYX Bridge (Polymesh × Ethereum)
 
 A two-way bridge between **native POLYX** on Polymesh and **wrapped wPOLYX (ERC-20)**
-on a local Ethereum chain (Anvil), running alongside this repo's Polymesh dev
-environment.
+on Ethereum (local Anvil or **Sepolia testnet**).
 
 > ⚠️ **MVP / research prototype.** Single trusted relayer. Not audited. Do not
 > use for real assets. See [Trust model & limitations](#trust-model--limitations).
+>
+> **Public testnet:** see **[TESTNET.md](./TESTNET.md)** — faucets, Sepolia deploy, relayer env.
 
 ---
 
@@ -57,15 +58,26 @@ is distinct from the repo's `evm` profile (Polymesh's own EVM layer on 8545).
 ### 2. Deploy the bridge contracts
 
 ```bash
+# Local Anvil
 ./bridge/scripts/deploy-eth.sh
+# → bridge/deployments/local.json
+
+# Sepolia testnet (needs funded DEPLOYER_KEY + RELAYER_ADDRESS)
+./bridge/scripts/deploy-eth.sh --network sepolia \
+  --private-key "$DEPLOYER_KEY" --relayer "$RELAYER_ADDRESS"
+# → bridge/deployments/sepolia.json
 ```
 
-Outputs `WPOLYX_ADDRESS` and `BRIDGE_ADDRESS`. Copy them into
-`bridge/relayer/.env`:
+Copy addresses into the matching env file:
 
 ```bash
+# Local
 cp bridge/relayer/.env.example bridge/relayer/.env
-# edit BRIDGE_ADDRESS and WPOLYX_ADDRESS
+# or: cp bridge/envs/local.env bridge/relayer/.env
+
+# Testnet
+cp bridge/relayer/.env.testnet.example bridge/relayer/.env.testnet
+# fill secrets + BRIDGE_ADDRESS / WPOLYX_ADDRESS — see TESTNET.md
 ```
 
 ### 3. Install relayer deps & bootstrap the escrow
@@ -79,7 +91,8 @@ yarn bootstrap        # funds escrow from dev //Alice (one-time, fresh chain)
 ### 4. Run the relayer
 
 ```bash
-yarn start
+yarn start              # local (.env)
+yarn start:testnet      # loads .env.testnet (BRIDGE_NETWORK=testnet)
 ```
 
 ### 5. Open the web UI (easiest way to click around)
@@ -87,11 +100,12 @@ yarn start
 ```bash
 cd bridge/web
 yarn install
-yarn dev
+yarn dev                          # local
+BRIDGE_NETWORK=testnet yarn dev   # Sepolia + Polymesh testnet config
 ```
 
 Open **http://localhost:5173** — pick accounts, amounts, flip direction, bridge both ways.
-See `bridge/web/README.md` for details.
+MetaMask switches to Anvil (local) or Sepolia (testnet). See `bridge/web/README.md` and **[TESTNET.md](./TESTNET.md)**.
 
 ### 6. Or exercise both directions via CLI / E2E
 
@@ -246,6 +260,9 @@ All knobs are env vars (see `bridge/relayer/.env.example`):
 ```
 bridge/
 ├── README.md                       this file
+├── TESTNET.md                      Sepolia + Polymesh testnet guide
+├── envs/                           local.env + testnet.env templates
+├── deployments/                    deploy-eth.sh output (local.json / sepolia.json)
 ├── .gitignore
 ├── contracts/                      Solidity (Foundry)
 │   ├── foundry.toml

@@ -433,6 +433,7 @@ function startApi(): void {
 
 async function main(): Promise<void> {
   log('RELAYER', 'starting');
+  log('RELAYER', `network=${config.network}`);
   if (!config.apiToken) {
     log('RELAYER', 'WARNING: BRIDGE_API_TOKEN disabled — intent API is open. Local use only.');
   } else {
